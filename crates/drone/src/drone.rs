@@ -4,7 +4,7 @@ use rand::Rng;
 use std::collections::{HashMap, HashSet};
 
 use wg_2024::controller::{DroneCommand, NodeEvent};
-use wg_2024::drone::{Drone, DroneOptions};
+use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::{FloodRequest, FloodResponse, Nack, NackType, NodeType, Packet, PacketType};
 
@@ -25,14 +25,21 @@ enum CommandResult {
 }
 
 impl Drone for RustDrone {
-    fn new(options: DroneOptions) -> Self {
+    fn new(
+        id: NodeId,
+        controller_send: Sender<NodeEvent>,
+        controller_recv: Receiver<DroneCommand>,
+        packet_recv: Receiver<Packet>,
+        packet_send: HashMap<NodeId, Sender<Packet>>,
+        pdr: f32,
+    ) -> Self {
         Self {
-            id: options.id,
-            controller_send: options.controller_send,
-            controller_recv: options.controller_recv,
-            packet_recv: options.packet_recv,
-            pdr: options.pdr,
-            packet_send: HashMap::new(),
+            id,
+            controller_send,
+            controller_recv,
+            packet_recv,
+            pdr,
+            packet_send,
             passed_flood_requests: HashSet::new(),
         }
     }
@@ -77,6 +84,16 @@ impl RustDrone {
             DroneCommand::AddSender(node_id, sender) => {
                 info!("Drone '{}' connected to '{}'", self.id, node_id);
                 self.packet_send.insert(node_id, sender);
+                CommandResult::Ok
+            }
+            DroneCommand::RemoveSender(node_id) => {
+                info!("Drone '{}' disconnected from '{}'", self.id, node_id);
+                if self.packet_send.remove(&node_id).is_none() {
+                    warn!(
+                        "Drone '{}' tried to disconnect from '{}', but it was not connected",
+                        self.id, node_id
+                    );
+                }
                 CommandResult::Ok
             }
             DroneCommand::SetPacketDropRate(pdr) => {
@@ -264,7 +281,6 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use wg_2024::drone::DroneOptions;
     use wg_2024::packet::Fragment;
 
     fn terminate_and_assert_quit(
@@ -306,17 +322,15 @@ mod tests {
         let (m_controller_send, d_controller_recv) = unbounded();
         let (_, t_packet_recv) = unbounded();
 
-        let drone_options = DroneOptions {
-            id: 1,
-            controller_send: d_controller_send,
-            controller_recv: d_controller_recv,
-            packet_recv: t_packet_recv,
-            pdr: 0.0,
-            packet_send: HashMap::new(),
-        };
-
         let drone_t = thread::spawn(move || {
-            let mut drone = RustDrone::new(drone_options);
+            let mut drone = RustDrone::new(
+                1,
+                d_controller_send,
+                d_controller_recv,
+                t_packet_recv,
+                HashMap::new(),
+                0.0,
+            );
             drone.run();
         });
 
@@ -330,17 +344,15 @@ mod tests {
         let (t_packet_send, t_packet_recv) = unbounded();
         let (neighbour_send, neighbour_recv) = unbounded();
 
-        let drone_options = DroneOptions {
-            id: 1,
-            controller_send: d_controller_send,
-            controller_recv: d_controller_recv,
-            packet_recv: t_packet_recv,
-            pdr: 0.0,
-            packet_send: HashMap::new(),
-        };
-
         let drone_t = thread::spawn(move || {
-            let mut drone = RustDrone::new(drone_options);
+            let mut drone = RustDrone::new(
+                1,
+                d_controller_send,
+                d_controller_recv,
+                t_packet_recv,
+                HashMap::new(),
+                0.0,
+            );
             drone.run();
         });
 

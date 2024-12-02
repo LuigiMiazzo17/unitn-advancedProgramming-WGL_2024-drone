@@ -5,7 +5,6 @@ use simulation_controller::{parse_config, SimulationController};
 use std::collections::HashMap;
 use std::thread;
 use wg_2024::drone::Drone;
-use wg_2024::drone::DroneOptions;
 
 fn main() {
     env_logger::init();
@@ -42,14 +41,14 @@ fn main() {
             .collect();
 
         handles.push(thread::spawn(move || {
-            let mut drone = RustDrone::new(DroneOptions {
-                id: drone.id,
-                controller_recv: controller_drone_recv,
-                controller_send: node_event_send,
+            let mut drone = RustDrone::new(
+                drone.id,
+                node_event_send,
+                controller_drone_recv,
                 packet_recv,
                 packet_send,
-                pdr: drone.pdr,
-            });
+                drone.pdr,
+            );
 
             drone.run();
         }));
