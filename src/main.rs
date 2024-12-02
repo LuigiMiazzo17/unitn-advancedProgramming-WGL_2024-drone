@@ -1,5 +1,6 @@
 use crossbeam::channel::unbounded;
 use drone::RustDrone;
+use log::debug;
 use simulation_controller::{parse_config, SimulationController};
 use std::collections::HashMap;
 use std::thread;
@@ -7,7 +8,10 @@ use wg_2024::drone::Drone;
 use wg_2024::drone::DroneOptions;
 
 fn main() {
+    env_logger::init();
+
     let config = parse_config("examples/config/base.toml");
+    debug!("Loaded config: {:?}", config);
 
     let mut controller_drones = HashMap::new();
     let (node_event_send, node_event_recv) = unbounded();

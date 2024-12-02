@@ -7,6 +7,8 @@ edition = "2021"
 members = ["crates/*"]
 
 [dependencies]
+log = "0.4.22"
+env_logger = "0.11.5"
 wg_2024 = { git = "https://github.com/WGL-2024/WGL_repo_2024.git", features = [
     "serialize",
 ] }
