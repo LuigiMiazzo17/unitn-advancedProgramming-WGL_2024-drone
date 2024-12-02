@@ -11,3 +11,5 @@ wg_2024 = { git = "https://github.com/WGL-2024/WGL_repo_2024.git", features = [
     "serialize",
 ] }
 drone = { path = "crates/drone" }
+simulation_controller = { path = "crates/simulation_controller" }
+crossbeam = "0.8.4"
