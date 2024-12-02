@@ -256,3 +256,129 @@ impl RustDrone {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam::channel::unbounded;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use wg_2024::drone::DroneOptions;
+    use wg_2024::packet::Fragment;
+
+    fn terminate_and_assert_quit(
+        drone_t: thread::JoinHandle<()>,
+        controller_send: Sender<DroneCommand>,
+    ) {
+        assert!(!drone_t.is_finished());
+
+        controller_send.send(DroneCommand::Crash).unwrap();
+
+        let timeout = Duration::from_secs(1);
+        let start_time = Instant::now();
+
+        // Wait for the drone to finish
+        while start_time.elapsed() < timeout {
+            if drone_t.is_finished() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("Drone did not quit in time");
+    }
+
+    fn generate_random_payload() -> (u8, [u8; 128]) {
+        let payload_len = rand::thread_rng().gen_range(1..128) as u8;
+        let mut payload: [u8; 128] = [0; 128];
+        let payload_vec = vec![rand::thread_rng().gen::<u8>(); payload_len as usize];
+
+        for (i, byte) in payload_vec.iter().enumerate() {
+            payload[i] = *byte;
+        }
+
+        (payload_len, payload)
+    }
+
+    #[test]
+    fn drone_crashes_upon_cmd() {
+        let (d_controller_send, _) = unbounded();
+        let (m_controller_send, d_controller_recv) = unbounded();
+        let (_, t_packet_recv) = unbounded();
+
+        let drone_options = DroneOptions {
+            id: 1,
+            controller_send: d_controller_send,
+            controller_recv: d_controller_recv,
+            packet_recv: t_packet_recv,
+            pdr: 0.0,
+            packet_send: HashMap::new(),
+        };
+
+        let drone_t = thread::spawn(move || {
+            let mut drone = RustDrone::new(drone_options);
+            drone.run();
+        });
+
+        terminate_and_assert_quit(drone_t, m_controller_send);
+    }
+
+    #[test]
+    fn drone_forwards_fragment() {
+        let (d_controller_send, _) = unbounded();
+        let (m_controller_send, d_controller_recv) = unbounded();
+        let (t_packet_send, t_packet_recv) = unbounded();
+        let (neighbour_send, neighbour_recv) = unbounded();
+
+        let drone_options = DroneOptions {
+            id: 1,
+            controller_send: d_controller_send,
+            controller_recv: d_controller_recv,
+            packet_recv: t_packet_recv,
+            pdr: 0.0,
+            packet_send: HashMap::new(),
+        };
+
+        let drone_t = thread::spawn(move || {
+            let mut drone = RustDrone::new(drone_options);
+            drone.run();
+        });
+
+        m_controller_send
+            .send(DroneCommand::AddSender(2, neighbour_send))
+            .unwrap();
+
+        // Wait for the drone to connect to the neighbour
+        thread::sleep(Duration::from_millis(100));
+
+        let (payload_len, payload) = generate_random_payload();
+        let session_id = rand::thread_rng().gen::<u64>();
+
+        let sending_packet = Packet {
+            pack_type: PacketType::MsgFragment(Fragment {
+                fragment_index: 0,
+                total_n_fragments: 1,
+                length: payload_len,
+                data: payload,
+            }),
+            routing_header: SourceRoutingHeader {
+                hops: vec![1, 2],
+                hop_index: 0,
+            },
+            session_id,
+        };
+
+        // Send the packet to the drone
+        t_packet_send.send(sending_packet.clone()).unwrap();
+
+        let received_packet = neighbour_recv.recv().unwrap();
+
+        let mut expected_packet = sending_packet;
+        // The packet should have been forwarded to the neighbour
+        expected_packet.routing_header.hop_index = 1;
+
+        assert_eq!(received_packet, expected_packet);
+
+        terminate_and_assert_quit(drone_t, m_controller_send);
+    }
+}
