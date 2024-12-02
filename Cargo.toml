@@ -1,0 +1,6 @@
+[package]
+name = "unitn-advancedprogramming-wgl_2024-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
