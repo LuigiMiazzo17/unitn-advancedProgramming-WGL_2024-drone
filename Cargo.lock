@@ -18,6 +18,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
 
 [[package]]
+name = "drone"
+version = "0.1.0"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -73,18 +77,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
 
 [[package]]
-name = "unitn-advancedprogramming-wgl_2024-rust"
-version = "0.1.0"
-dependencies = [
- "wg_2024",
-]
-
-[[package]]
 name = "wg_2024"
 version = "0.1.0"
 source = "git+https://github.com/WGL-2024/WGL_repo_2024.git#89d4c9dfebb05be246459b03d81b61064d0a15b2"
 dependencies = [
  "wg_internal",
+]
+
+[[package]]
+name = "wg_2024-rust"
+version = "0.1.0"
+dependencies = [
+ "drone",
+ "wg_2024",
 ]
 
 [[package]]
