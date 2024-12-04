@@ -118,24 +118,24 @@ impl RustDrone {
         {
             // list has another hop, we can try forwarding the packet
             if let Some(sender) = self.packet_send.get(next_hop) {
-                // we are connected to the next hop, now we might want to drop the packet only if it's a fragment
-                if rand::thread_rng().gen_range(0.0..1.0) > self.pdr
-                    && matches!(packet.pack_type, PacketType::MsgFragment(_))
-                {
-                    // luck is on our side, we can send the packet
-                    debug!("Packet has been forwarded to '{}'", next_hop);
-                    packet.routing_header.hop_index += 1;
-                    sender.send(packet.clone()).unwrap(); // sketchy clone
-                    self.controller_send
-                        .send(NodeEvent::PacketSent(packet))
-                        .unwrap();
+                // if the packet is a nack, we can forward it without checking the PDR
+                if matches!(packet.pack_type, PacketType::Nack(_)) {
+                    &self.send_packet(packet, next_hop, sender);
                 } else {
-                    // drop the packet
-                    info!("Packet has been dropped from node '{}'", self.id);
-                    self.return_nack(&packet, NackType::Dropped);
-                    self.controller_send
-                        .send(NodeEvent::PacketDropped(packet))
-                        .unwrap();
+                    // we are connected to the next hop, now we might want to drop the packet only if it's a fragment
+                    if rand::thread_rng().gen_range(0.0..1.0) > self.pdr
+                        && matches!(packet.pack_type, PacketType::MsgFragment(_))
+                    {
+                        // luck is on our side, we can send the packet
+                        &self.send_packet(packet, next_hop, sender);
+                    } else {
+                        // drop the packet
+                        info!("Packet has been dropped from node '{}'", self.id);
+                        self.return_nack(&packet, NackType::Dropped);
+                        self.controller_send
+                            .send(NodeEvent::PacketDropped(packet))
+                            .unwrap();
+                    }
                 }
             } else {
                 // next hop is not in the list of connected nodes
@@ -150,6 +150,17 @@ impl RustDrone {
             warn!("Destination is drone '{}' itself", self.id);
             self.return_nack(&packet, NackType::DestinationIsDrone);
         }
+    }
+
+    /// Send packet to the next hop
+    fn send_packet(&self, mut packet: Packet, next_hop: &NodeId, sender: &Sender<Packet>) {
+        debug!("Packet has been forwarded to '{}'", next_hop);
+        packet.routing_header.hop_index += 1;
+
+        sender.send(packet.clone()).unwrap(); // sketchy clone
+        self.controller_send
+            .send(NodeEvent::PacketSent(packet))
+            .unwrap();
     }
 
     fn return_nack(&self, packet: &Packet, nack_type: NackType) {
