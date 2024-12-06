@@ -1,10 +1,10 @@
 use crossbeam::channel::unbounded;
-use drone::RustDrone;
 use log::debug;
-use simulation_controller::{parse_config, SimulationController};
 use std::collections::HashMap;
 use std::thread;
 use wg_2024::drone::Drone;
+use wg_2024_rust::drone::RustDrone;
+use wg_2024_rust::simulation_controller::{parse_config, SimulationController};
 
 fn main() {
     env_logger::init();
