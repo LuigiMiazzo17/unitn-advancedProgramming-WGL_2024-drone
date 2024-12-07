@@ -68,28 +68,31 @@ impl Drone for RustDrone {
 
 impl RustDrone {
     fn handle_packet(&mut self, packet: Packet) {
-        if let Some(current_hop) = Self::get_current_hop(&packet) {
-            if current_hop != self.id {
-                // we received a packet with wrong current hop
-                warn!(
-                    "Drone '{}' received packet with wrong current hop '{}'",
-                    self.id, current_hop
-                );
-                trace!("Packet: {:?}", packet);
-            } else {
-                // handle correctly the packet
-                debug!("Drone '{}' processing packet", self.id);
-                trace!("Packet: {:?}", packet);
+        trace!("Packet: {:?}", packet);
 
-                match packet.pack_type {
-                    PacketType::FloodRequest(_) => self.handle_flood_request(packet),
-                    _ => self.route_packet(packet),
-                }
+        let current_hop = match Self::get_current_hop(&packet) {
+            Some(current_hop) => current_hop,
+            None => {
+                // we received a packet with no current hop
+                error!("Recived packet with no current hop");
+                return;
+            }
+        };
+
+        if current_hop == self.id {
+            // handle correctly the packet
+            debug!("Drone '{}' processing packet", self.id);
+
+            match packet.pack_type {
+                PacketType::FloodRequest(_) => self.handle_flood_request(packet),
+                _ => self.route_packet(packet),
             }
         } else {
-            // we received a packet with no current hop
-            error!("Recived packet with no current hop");
-            trace!("Packet: {:?}", packet);
+            // we received a packet with wrong current hop
+            warn!(
+                "Drone '{}' received packet with wrong current hop '{}'",
+                self.id, current_hop
+            );
 
             self.return_nack(&packet, NackType::UnexpectedRecipient(self.id))
         }
