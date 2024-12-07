@@ -2,6 +2,7 @@ use crossbeam::channel::{select_biased, Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
+use std::thread;
 
 use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
@@ -68,33 +69,39 @@ impl Drone for RustDrone {
 
 impl RustDrone {
     fn handle_packet(&mut self, packet: Packet) {
-        trace!("Packet: {:?}", packet);
+        trace!(
+            "Drone '{}' on thread '{}' recived packet: {:?}",
+            self.id,
+            thread::current().name().unwrap_or("unnamed"),
+            packet
+        );
 
-        let current_hop = match Self::get_current_hop(&packet) {
-            Some(current_hop) => current_hop,
-            None => {
-                // we received a packet with no current hop
-                error!("Recived packet with no current hop");
-                return;
+        match packet.pack_type {
+            PacketType::FloodRequest(_) => self.handle_flood_request(packet),
+            _ => {
+                let current_hop = match Self::get_current_hop(&packet) {
+                    Some(current_hop) => current_hop,
+                    None => {
+                        // we received a packet with no current hop
+                        error!("Recived packet with no current hop");
+                        return;
+                    }
+                };
+
+                if current_hop == self.id {
+                    // handle correctly the packet
+                    debug!("Drone '{}' processing packet", self.id);
+                    self.route_packet(packet)
+                } else {
+                    // we received a packet with wrong current hop
+                    warn!(
+                        "Drone '{}' received packet with wrong current hop '{}'",
+                        self.id, current_hop
+                    );
+
+                    self.return_nack(&packet, NackType::UnexpectedRecipient(self.id))
+                }
             }
-        };
-
-        if current_hop == self.id {
-            // handle correctly the packet
-            debug!("Drone '{}' processing packet", self.id);
-
-            match packet.pack_type {
-                PacketType::FloodRequest(_) => self.handle_flood_request(packet),
-                _ => self.route_packet(packet),
-            }
-        } else {
-            // we received a packet with wrong current hop
-            warn!(
-                "Drone '{}' received packet with wrong current hop '{}'",
-                self.id, current_hop
-            );
-
-            self.return_nack(&packet, NackType::UnexpectedRecipient(self.id))
         }
     }
 
@@ -153,18 +160,33 @@ impl RustDrone {
             if matches!(e, crossbeam::channel::TrySendError::Disconnected(_)) {
                 let sender_id = Self::get_next_hop(&packet).unwrap();
                 if self.packet_send.remove(&sender_id).is_none() {
-                    warn!(
+                    error!(
                         "Drone '{}' tried to disconnect from '{}', but it was not connected",
                         self.id, sender_id
                     );
                 }
+                warn!(
+                    "Drone '{}' disconnected from '{}' due to channel disconnected",
+                    self.id, sender_id
+                );
+            } else {
+                error!(
+                    "Drone '{}' failed to send packet to channel: {}",
+                    self.id, e
+                );
             }
 
             if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
-                error!("Error sending PacketDropped event to controller: {}", e);
+                error!(
+                    "Drone '{}' failed to send PacketDropped event to controller: {}",
+                    self.id, e
+                );
             }
         } else if let Err(e) = self.controller_send.send(DroneEvent::PacketSent(packet)) {
-            error!("Error sending PacketSent event to controller: {}", e);
+            error!(
+                "Drone '{}' failed to send PacketSent event to controller: {}",
+                self.id, e
+            );
         }
     }
 
@@ -215,7 +237,10 @@ impl RustDrone {
             info!("Packet has been dropped from node '{}'", self.id);
             self.return_nack(&packet, NackType::Dropped);
             if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
-                error!("Error sending PacketDropped event: {}", e);
+                error!(
+                    "Drone '{}' failed to send PacketDropped event: {}",
+                    self.id, e
+                );
             }
         }
     }
@@ -280,6 +305,11 @@ impl RustDrone {
                 session_id,
             };
 
+            trace!(
+                "Drone '{}' returning flood response to '{}'",
+                self.id,
+                neighbour
+            );
             self.deliver_packet(sender, flood_response);
         } else {
             error!(
@@ -295,11 +325,11 @@ impl RustDrone {
             _ => unreachable!(),
         };
 
-        debug!(
+        trace!(
             "Drone '{}' handling flood request with id '{}'",
-            self.id, flood_request.flood_id
+            self.id,
+            flood_request.flood_id
         );
-        flood_request.path_trace.push((self.id, NodeType::Drone));
 
         let sender_id = match flood_request.path_trace.last() {
             Some(a) => a.0,
@@ -312,16 +342,18 @@ impl RustDrone {
             }
         };
 
+        flood_request.path_trace.push((self.id, NodeType::Drone));
+
         if self.seen_flood_requests.contains(&flood_request.flood_id) {
             // we have already seen this flood request
-            info!(
+            debug!(
                 "Drone '{}' has already seen flood request with id '{}'",
                 self.id, flood_request.flood_id
             );
             self.return_flood_response(flood_request, sender_id, packet.session_id);
         } else {
             // never seen this flood request
-            info!(
+            debug!(
                 "Drone '{}' handling flood request with id '{}' for the first time",
                 self.id, flood_request.flood_id
             );
@@ -354,9 +386,9 @@ impl RustDrone {
                     }
                 }
             } else {
-                // we have only one neighbour, we can return the flood responce
+                // we have only one neighbour, we can return the flood response
                 debug!(
-                    "Drone '{}' has no other neighbour, returning a flood responce to {}",
+                    "Drone '{}' has no other neighbour, returning a flood response to '{}'",
                     self.id, sender_id
                 );
                 self.return_flood_response(flood_request, sender_id, packet.session_id);
