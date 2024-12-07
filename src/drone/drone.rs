@@ -68,14 +68,30 @@ impl Drone for RustDrone {
 
 impl RustDrone {
     fn handle_packet(&mut self, packet: Packet) {
-        match packet.pack_type {
-            PacketType::Nack(_) => self.route_packet(packet),
-            PacketType::Ack(_) => self.route_packet(packet),
-            PacketType::MsgFragment(_) => self.route_packet(packet),
-            PacketType::FloodRequest(flood_request) => {
-                self.handle_flood_request(flood_request, packet.session_id)
+        if let Some(current_hop) = Self::get_current_hop(&packet) {
+            if current_hop != self.id {
+                // we received a packet with wrong current hop
+                warn!(
+                    "Drone '{}' received packet with wrong current hop '{}'",
+                    self.id, current_hop
+                );
+                trace!("Packet: {:?}", packet);
+            } else {
+                // handle correctly the packet
+                debug!("Drone '{}' processing packet", self.id);
+                trace!("Packet: {:?}", packet);
+
+                match packet.pack_type {
+                    PacketType::FloodRequest(_) => self.handle_flood_request(packet),
+                    _ => self.route_packet(packet),
+                }
             }
-            PacketType::FloodResponse(_) => self.route_packet(packet),
+        } else {
+            // we received a packet with no current hop
+            error!("Recived packet with no current hop");
+            trace!("Packet: {:?}", packet);
+
+            self.return_nack(&packet, NackType::UnexpectedRecipient(self.id))
         }
     }
 
@@ -108,76 +124,109 @@ impl RustDrone {
         }
     }
 
-    fn route_packet(&self, mut packet: Packet) {
-        debug!("Drone '{}' forwarding packet", self.id);
-        trace!("Packet: {:?}", packet);
+    fn get_previous_hop(packet: &Packet) -> Option<NodeId> {
+        packet
+            .routing_header
+            .hops
+            .get(packet.routing_header.hop_index - 1)
+            .cloned()
+    }
 
-        // check if the packet has another hop
-        if let Some(next_hop) = packet
+    fn get_current_hop(packet: &Packet) -> Option<NodeId> {
+        packet
+            .routing_header
+            .hops
+            .get(packet.routing_header.hop_index)
+            .cloned()
+    }
+
+    fn get_next_hop(packet: &Packet) -> Option<NodeId> {
+        packet
             .routing_header
             .hops
             .get(packet.routing_header.hop_index + 1)
-        {
-            // list has another hop, we can try forwarding the packet
-            if let Some(sender) = self.packet_send.get(next_hop) {
-                // we are connected to the next hop, now we might want to drop the packet only if it's a fragment
-                if !matches!(packet.pack_type, PacketType::MsgFragment(_))
-                    || rand::thread_rng().gen_range(0.0..1.0) >= self.pdr
-                {
-                    // luck is on our side, we can forward the packet
-                    debug!("Drone '{}' forwarding packet to '{}'", self.id, next_hop);
-                    packet.routing_header.hop_index += 1;
+            .cloned()
+    }
 
-                    if let Err(e) = sender.send(packet.clone()) {
-                        error!("Error sending packet: {}", e);
-                        if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet))
-                        {
-                            error!("Error sending PacketDropped event: {}", e);
-                        }
-                    } else if let Err(e) = self.controller_send.send(DroneEvent::PacketSent(packet))
-                    {
-                        error!("Error sending PacketSent event: {}", e);
-                    }
+    fn get_source(packet: &Packet) -> Option<NodeId> {
+        packet.routing_header.hops.first().cloned()
+    }
+
+    // fn get_destination(packet: &Packet) -> Option<NodeId> {
+    //     packet.routing_header.hops.last().cloned()
+    // }
+
+    fn route_packet(&self, mut packet: Packet) {
+        // check if the packet has another hop
+        let next_hop = match Self::get_next_hop(&packet) {
+            Some(next_hop) => next_hop,
+            None => {
+                // the destination is the drone itself
+                if !matches!(&packet.pack_type, PacketType::Nack(_)) {
+                    warn!("Destination is drone '{}' itself", self.id);
+                    self.return_nack(&packet, NackType::DestinationIsDrone);
                 } else {
-                    // drop the packet
-                    info!("Packet has been dropped from node '{}'", self.id);
-                    self.return_nack(&packet, NackType::Dropped);
-                    if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
-                        error!("Error sending PacketDropped event: {}", e);
-                    }
-                }
-            } else {
+                    debug!(
+                        "Packet is a Nack, destination is drone '{}' itself",
+                        self.id
+                    );
+                };
+                return;
+            }
+        };
+
+        // check if the next hop is in the list of connected nodes
+        let forward_channel = match self.packet_send.get(&next_hop) {
+            Some(sender) => sender,
+            None => {
                 // next hop is not in the list of connected nodes
                 warn!(
                     "Next hop is not in the list of connected nodes for drone '{}'",
                     self.id
                 );
-                self.return_nack(&packet, NackType::ErrorInRouting(*next_hop));
+                self.return_nack(&packet, NackType::ErrorInRouting(next_hop));
+                return;
+            }
+        };
+
+        // we are connected to the next hop, now we might want to drop the packet only if it's a fragment
+        if !matches!(packet.pack_type, PacketType::MsgFragment(_))
+            || rand::thread_rng().gen_range(0.0..1.0) >= self.pdr
+        {
+            // luck is on our side, we can forward the packet
+            debug!("Drone '{}' forwarding packet to '{}'", self.id, next_hop);
+            packet.routing_header.hop_index += 1;
+
+            if let Err(e) = forward_channel.send(packet.clone()) {
+                error!("Error sending packet: {}", e);
+                if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
+                    error!("Error sending PacketDropped event: {}", e);
+                }
+            } else if let Err(e) = self.controller_send.send(DroneEvent::PacketSent(packet)) {
+                error!("Error sending PacketSent event: {}", e);
             }
         } else {
-            // the destination is the drone itself
-            if !matches!(&packet.pack_type, PacketType::Nack(_)) {
-                warn!("Destination is drone '{}' itself", self.id);
-                self.return_nack(&packet, NackType::DestinationIsDrone);
-            } else {
-                debug!(
-                    "Packet is a Nack, destination is drone '{}' itself",
-                    self.id
-                );
+            // drop the packet
+            info!("Packet has been dropped from node '{}'", self.id);
+            self.return_nack(&packet, NackType::Dropped);
+            if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
+                error!("Error sending PacketDropped event: {}", e);
             }
         }
     }
 
     fn return_nack(&self, packet: &Packet, nack_type: NackType) {
         info!(
-            "Returning NACK to sender '{}' from '{}' with reason '{:?}'",
-            packet.routing_header.hops[0], self.id, nack_type
+            "Returning NACK to sender '{:?}' from '{}' with reason '{:?}'",
+            Self::get_source(packet),
+            self.id,
+            nack_type
         );
 
+        // reverse the hops list to get new path
         let hops = packet
             .routing_header
             .hops
-            .clone()
             .split_at(packet.routing_header.hop_index + 1)
             .0
             .iter()
@@ -185,6 +234,7 @@ impl RustDrone {
             .cloned()
             .collect();
 
+        // build the NACK packet
         let nack = Packet {
             pack_type: PacketType::Nack(Nack {
                 fragment_index: if let PacketType::MsgFragment(fragment) = &packet.pack_type {
@@ -194,23 +244,12 @@ impl RustDrone {
                 },
                 nack_type,
             }),
-            routing_header: SourceRoutingHeader { hops, hop_index: 1 },
+            routing_header: SourceRoutingHeader { hops, hop_index: 0 },
             session_id: packet.session_id,
         };
 
-        match self.packet_send.get(&nack.routing_header.hops[1]) {
-            Some(sender) => {
-                if let Err(e) = sender.send(nack.clone()) {
-                    error!("Error sending NACK: {}", e);
-                }
-            }
-            None => {
-                error!(
-                    "Next hop is not in the list of connected nodes for drone '{}', even though it was received from it",
-                    self.id
-                );
-            }
-        }
+        // now route the NACK packet
+        self.route_packet(nack);
     }
 
     fn return_flood_response(
@@ -221,7 +260,6 @@ impl RustDrone {
     ) {
         let hops = flood_request
             .path_trace
-            .clone()
             .iter()
             .rev()
             .map(|(id, _)| *id)
@@ -246,11 +284,15 @@ impl RustDrone {
         }
     }
 
-    fn handle_flood_request(&mut self, mut flood_request: FloodRequest, session_id: u64) {
-        trace!(
+    fn handle_flood_request(&mut self, packet: Packet) {
+        let mut flood_request = match packet.pack_type {
+            PacketType::FloodRequest(flood_request) => flood_request,
+            _ => unreachable!(),
+        };
+
+        debug!(
             "Drone '{}' handling flood request with id '{}'",
-            self.id,
-            flood_request.flood_id
+            self.id, flood_request.flood_id
         );
         flood_request.path_trace.push((self.id, NodeType::Drone));
 
@@ -268,7 +310,7 @@ impl RustDrone {
                 "Drone '{}' has already seen flood request with id '{}'",
                 self.id, flood_request.flood_id
             );
-            self.return_flood_response(flood_request, sender_id, session_id);
+            self.return_flood_response(flood_request, sender_id, packet.session_id);
         } else {
             // never seen this flood request
             info!(
@@ -296,7 +338,7 @@ impl RustDrone {
                                 hops: Vec::new(),
                                 hop_index: 0,
                             },
-                            session_id,
+                            session_id: packet.session_id,
                         }) {
                             error!("Error sending flood request: {}", e);
                         }
@@ -308,7 +350,7 @@ impl RustDrone {
                     "Drone '{}' has no other neighbour, returning a flood responce to {}",
                     self.id, sender_id
                 );
-                self.return_flood_response(flood_request, sender_id, session_id);
+                self.return_flood_response(flood_request, sender_id, packet.session_id);
             }
         }
     }
