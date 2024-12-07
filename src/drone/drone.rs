@@ -295,28 +295,32 @@ impl RustDrone {
             .map(|(id, _)| *id)
             .collect();
 
-        if let Some(sender) = self.packet_send.clone().get(&neighbour) {
-            let flood_response = Packet {
-                pack_type: PacketType::FloodResponse(FloodResponse {
-                    flood_id: flood_request.flood_id,
-                    path_trace: flood_request.path_trace,
-                }),
-                routing_header: SourceRoutingHeader { hops, hop_index: 1 },
-                session_id,
-            };
-
-            trace!(
-                "Drone '{}' returning flood response to '{}'",
-                self.id,
-                neighbour
-            );
-            self.deliver_packet(sender, flood_response);
-        } else {
-            error!(
+        let sender = match self.packet_send.get(&neighbour) {
+            Some(sender) => sender.clone(),
+            None => {
+                error!(
                     "Next hop is not in the list of connected nodes for drone '{}', even though it was received from it",
                     self.id
                 );
-        }
+                return;
+            }
+        };
+
+        let flood_response = Packet {
+            pack_type: PacketType::FloodResponse(FloodResponse {
+                flood_id: flood_request.flood_id,
+                path_trace: flood_request.path_trace,
+            }),
+            routing_header: SourceRoutingHeader { hops, hop_index: 1 },
+            session_id,
+        };
+
+        trace!(
+            "Drone '{}' returning flood response to '{}'",
+            self.id,
+            neighbour
+        );
+        self.deliver_packet(&sender, flood_response);
     }
 
     fn handle_flood_request(&mut self, packet: Packet) {
@@ -367,23 +371,27 @@ impl RustDrone {
             );
 
                 for (neighbour, sender) in self.packet_send.clone().iter() {
-                    if *neighbour != sender_id {
-                        trace!(
-                            "Drone '{}' forwarding flood request to '{}'",
-                            self.id,
-                            neighbour
-                        );
-                        let flood_request = Packet {
+                    if *neighbour == sender_id {
+                        continue;
+                    }
+
+                    trace!(
+                        "Drone '{}' forwarding flood request to '{}'",
+                        self.id,
+                        neighbour
+                    );
+
+                    self.deliver_packet(
+                        sender,
+                        Packet {
                             pack_type: PacketType::FloodRequest(flood_request.clone()),
                             routing_header: SourceRoutingHeader {
                                 hops: Vec::new(),
                                 hop_index: 0,
                             },
                             session_id: packet.session_id,
-                        };
-
-                        self.deliver_packet(sender, flood_request);
-                    }
+                        },
+                    );
                 }
             } else {
                 // we have only one neighbour, we can return the flood response
