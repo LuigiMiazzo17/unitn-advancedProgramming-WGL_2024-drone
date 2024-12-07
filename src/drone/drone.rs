@@ -16,7 +16,7 @@ pub struct RustDrone {
     packet_recv: Receiver<Packet>,
     pdr: f32,
     packet_send: HashMap<NodeId, Sender<Packet>>,
-    passed_flood_requests: HashSet<u64>,
+    seen_flood_requests: HashSet<u64>,
 }
 
 enum CommandResult {
@@ -40,7 +40,7 @@ impl Drone for RustDrone {
             packet_recv,
             pdr,
             packet_send,
-            passed_flood_requests: HashSet::new(),
+            seen_flood_requests: HashSet::new(),
         }
     }
 
@@ -127,14 +127,6 @@ impl RustDrone {
         }
     }
 
-    fn get_previous_hop(packet: &Packet) -> Option<NodeId> {
-        packet
-            .routing_header
-            .hops
-            .get(packet.routing_header.hop_index - 1)
-            .cloned()
-    }
-
     fn get_current_hop(packet: &Packet) -> Option<NodeId> {
         packet
             .routing_header
@@ -155,11 +147,28 @@ impl RustDrone {
         packet.routing_header.hops.first().cloned()
     }
 
-    // fn get_destination(packet: &Packet) -> Option<NodeId> {
-    //     packet.routing_header.hops.last().cloned()
-    // }
+    fn deliver_packet(&mut self, channel: &Sender<Packet>, packet: Packet) {
+        if let Err(e) = channel.try_send(packet.clone()) {
+            // if error indicates that the receiver has been dropped, we should remove the sender
+            if matches!(e, crossbeam::channel::TrySendError::Disconnected(_)) {
+                let sender_id = Self::get_next_hop(&packet).unwrap();
+                if self.packet_send.remove(&sender_id).is_none() {
+                    warn!(
+                        "Drone '{}' tried to disconnect from '{}', but it was not connected",
+                        self.id, sender_id
+                    );
+                }
+            }
 
-    fn route_packet(&self, mut packet: Packet) {
+            if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
+                error!("Error sending PacketDropped event to controller: {}", e);
+            }
+        } else if let Err(e) = self.controller_send.send(DroneEvent::PacketSent(packet)) {
+            error!("Error sending PacketSent event to controller: {}", e);
+        }
+    }
+
+    fn route_packet(&mut self, mut packet: Packet) {
         // check if the packet has another hop
         let next_hop = match Self::get_next_hop(&packet) {
             Some(next_hop) => next_hop,
@@ -180,7 +189,7 @@ impl RustDrone {
 
         // check if the next hop is in the list of connected nodes
         let forward_channel = match self.packet_send.get(&next_hop) {
-            Some(sender) => sender,
+            Some(sender) => sender.clone(),
             None => {
                 // next hop is not in the list of connected nodes
                 warn!(
@@ -200,14 +209,7 @@ impl RustDrone {
             debug!("Drone '{}' forwarding packet to '{}'", self.id, next_hop);
             packet.routing_header.hop_index += 1;
 
-            if let Err(e) = forward_channel.send(packet.clone()) {
-                error!("Error sending packet: {}", e);
-                if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
-                    error!("Error sending PacketDropped event: {}", e);
-                }
-            } else if let Err(e) = self.controller_send.send(DroneEvent::PacketSent(packet)) {
-                error!("Error sending PacketSent event: {}", e);
-            }
+            self.deliver_packet(&forward_channel, packet)
         } else {
             // drop the packet
             info!("Packet has been dropped from node '{}'", self.id);
@@ -218,7 +220,7 @@ impl RustDrone {
         }
     }
 
-    fn return_nack(&self, packet: &Packet, nack_type: NackType) {
+    fn return_nack(&mut self, packet: &Packet, nack_type: NackType) {
         info!(
             "Returning NACK to sender '{:?}' from '{}' with reason '{:?}'",
             Self::get_source(packet),
@@ -268,17 +270,17 @@ impl RustDrone {
             .map(|(id, _)| *id)
             .collect();
 
-        if let Some(sender) = self.packet_send.get(&neighbour) {
-            if let Err(e) = sender.send(Packet {
+        if let Some(sender) = self.packet_send.clone().get(&neighbour) {
+            let flood_response = Packet {
                 pack_type: PacketType::FloodResponse(FloodResponse {
                     flood_id: flood_request.flood_id,
                     path_trace: flood_request.path_trace,
                 }),
                 routing_header: SourceRoutingHeader { hops, hop_index: 1 },
                 session_id,
-            }) {
-                error!("Error sending flood response: {}", e);
-            }
+            };
+
+            self.deliver_packet(sender, flood_response);
         } else {
             error!(
                     "Next hop is not in the list of connected nodes for drone '{}', even though it was received from it",
@@ -302,12 +304,15 @@ impl RustDrone {
         let sender_id = match flood_request.path_trace.last() {
             Some(a) => a.0,
             None => {
-                error!("Path trace is empty");
+                error!(
+                    "Path trace in flood request {} is empty",
+                    flood_request.flood_id
+                );
                 return;
             }
         };
 
-        if self.passed_flood_requests.contains(&flood_request.flood_id) {
+        if self.seen_flood_requests.contains(&flood_request.flood_id) {
             // we have already seen this flood request
             info!(
                 "Drone '{}' has already seen flood request with id '{}'",
@@ -317,34 +322,35 @@ impl RustDrone {
         } else {
             // never seen this flood request
             info!(
-                "Drone '{}' has never seen flood request with id '{}'",
+                "Drone '{}' handling flood request with id '{}' for the first time",
                 self.id, flood_request.flood_id
             );
-            self.passed_flood_requests.insert(flood_request.flood_id);
+            self.seen_flood_requests.insert(flood_request.flood_id);
 
             if self.packet_send.len() > 1 {
                 // we have more than one neighbour, we need to forward the flood request to all but one
-                trace!(
-                    "Drone '{}' has more than one neighbour, forwarding flood request",
-                    self.id
-                );
+                debug!(
+                "Drone '{}' has more than one neighbour, forwarding flood request to all but '{}'",
+                self.id, sender_id
+            );
 
-                for (neighbour, sender) in self.packet_send.iter() {
+                for (neighbour, sender) in self.packet_send.clone().iter() {
                     if *neighbour != sender_id {
-                        debug!(
+                        trace!(
                             "Drone '{}' forwarding flood request to '{}'",
-                            self.id, neighbour
+                            self.id,
+                            neighbour
                         );
-                        if let Err(e) = sender.send(Packet {
+                        let flood_request = Packet {
                             pack_type: PacketType::FloodRequest(flood_request.clone()),
                             routing_header: SourceRoutingHeader {
                                 hops: Vec::new(),
                                 hop_index: 0,
                             },
                             session_id: packet.session_id,
-                        }) {
-                            error!("Error sending flood request: {}", e);
-                        }
+                        };
+
+                        self.deliver_packet(sender, flood_request);
                     }
                 }
             } else {
