@@ -1,0 +1,14 @@
+name: CI
+
+on: [push]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Run tests
+        uses: frequenz-floss/gh-action-cargo-test@v1.0.0
