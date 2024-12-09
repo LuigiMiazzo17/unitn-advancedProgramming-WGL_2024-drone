@@ -138,7 +138,17 @@ fn wrap_generic_fragment_drop() {
 }
 
 #[test]
-fn generic_chain_fragment_drop() {
+fn wrap_generic_chain_fragment_drop() {
+    generic_chain_fragment_drop::<RustDrone>();
+}
+
+#[test]
+fn wrap_generic_chain_fragment_ack() {
+    generic_chain_fragment_ack::<RustDrone>();
+}
+
+#[test]
+fn generic_chain_fragment_drop_2() {
     let (c_send, c_recv) = unbounded();
     let (s_send, _s_recv) = unbounded();
 

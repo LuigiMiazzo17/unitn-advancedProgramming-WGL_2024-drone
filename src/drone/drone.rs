@@ -236,13 +236,16 @@ impl RustDrone {
         } else {
             // drop the packet
             info!("Packet has been dropped from node '{}'", self.id);
-            self.return_nack(&packet, NackType::Dropped);
-            if let Err(e) = self.controller_send.send(DroneEvent::PacketDropped(packet)) {
+            if let Err(e) = self
+                .controller_send
+                .send(DroneEvent::PacketDropped(packet.clone()))
+            {
                 error!(
                     "Drone '{}' failed to send PacketDropped event: {}",
                     self.id, e
                 );
             }
+            self.return_nack(&packet, NackType::Dropped);
         }
     }
 
