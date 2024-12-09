@@ -169,6 +169,7 @@ impl RustDrone {
                     "Drone '{}' disconnected from '{}' due to channel disconnected",
                     self.id, sender_id
                 );
+                self.return_nack(&packet, NackType::ErrorInRouting(sender_id));
             } else {
                 error!(
                     "Drone '{}' failed to send packet to channel: {}",
