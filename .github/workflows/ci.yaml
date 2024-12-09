@@ -16,7 +16,7 @@ jobs:
           cargo-test-parameters: "--codecov --output-path codecov.json"
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: codecov.json
