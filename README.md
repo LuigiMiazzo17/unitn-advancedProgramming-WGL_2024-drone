@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/gh/LuigiMiazzo17/unitn-advancedProgramming-WGL_2024-rust/branch/master/graph/badge.svg?token=FLZ8SBSZ7U)](https://codecov.io/gh/LuigiMiazzo17/unitn-advancedProgramming-WGL_2024-rust)
+
 # Advanced Programming Project - Group Rust
 
 This project is part of the Advanced Programming course at the University of Trento.\
