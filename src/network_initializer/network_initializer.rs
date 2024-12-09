@@ -11,21 +11,21 @@ use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
 use wg_2024::network::NodeId;
 
-pub fn parse_config(file: &str) -> Config {
-    let file_str = fs::read_to_string(file).unwrap();
-    let conf = toml::from_str(&file_str).unwrap();
+pub fn parse_config(file: &str) -> anyhow::Result<Config> {
+    let file_str = fs::read_to_string(file)?;
+    let conf = toml::from_str(&file_str)?;
     debug!("Loaded config: {:?}", conf);
-    conf
+    Ok(conf)
 }
 
 #[allow(clippy::type_complexity)]
 pub fn spawn_network(
     config: Config,
-) -> (
+) -> anyhow::Result<(
     HashMap<NodeId, Sender<DroneCommand>>,
     Receiver<DroneEvent>,
     Vec<thread::JoinHandle<()>>,
-) {
+)> {
     let mut controller_drones = HashMap::new();
     let (node_event_send, node_event_recv) = unbounded();
 
@@ -68,10 +68,9 @@ pub fn spawn_network(
                     );
 
                     drone.run();
-                })
-                .unwrap(),
+                })?,
         );
     }
 
-    (controller_drones, node_event_recv, handles)
+    Ok((controller_drones, node_event_recv, handles))
 }

@@ -158,7 +158,7 @@ impl RustDrone {
         if let Err(e) = channel.try_send(packet.clone()) {
             // if error indicates that the receiver has been dropped, we should remove the sender
             if matches!(e, crossbeam::channel::TrySendError::Disconnected(_)) {
-                let sender_id = Self::get_next_hop(&packet).unwrap();
+                let sender_id = Self::get_next_hop(&packet).unwrap_or(0);
                 if self.packet_send.remove(&sender_id).is_none() {
                     error!(
                         "Drone '{}' tried to disconnect from '{}', but it was not connected",

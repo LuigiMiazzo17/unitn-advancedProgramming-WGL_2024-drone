@@ -9,9 +9,10 @@ pub struct SimulationController {
 }
 
 impl SimulationController {
-    pub fn crash_all(&mut self) {
+    pub fn crash_all(&mut self) -> anyhow::Result<()> {
         for (_, sender) in self.drones.iter() {
-            sender.send(DroneCommand::Crash).unwrap();
+            sender.send(DroneCommand::Crash)?;
         }
+        Ok(())
     }
 }
