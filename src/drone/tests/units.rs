@@ -3,11 +3,11 @@ use super::utils::{
     generate_random_payload, provision_drones_from_config, send_command_to_drone,
     send_packet_to_drone, terminate_env,
 };
+use super::MAX_PACKET_WAIT;
 
 use crossbeam::channel::unbounded;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use wg_2024::controller::DroneCommand;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
@@ -61,7 +61,7 @@ fn drone_forwards_fragment() {
     expected_packet.routing_header.hop_index = 1;
 
     assert_eq!(
-        d2_recv.recv_timeout(Duration::from_secs(1)).unwrap(),
+        d2_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(),
         expected_packet
     );
 
@@ -120,7 +120,7 @@ fn generic_chain_fragment_drop_2() {
     send_packet_to_drone(&env, 11, msg.clone());
 
     assert_eq!(
-        c_recv.recv_timeout(Duration::from_secs(1)).unwrap(),
+        c_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(),
         Packet {
             pack_type: PacketType::Nack(Nack {
                 fragment_index: 1,
@@ -172,7 +172,7 @@ fn round_trip_message() {
 
     msg.routing_header.hop_index = 3;
     // Server receives the fragment
-    assert_eq!(s_recv.recv_timeout(Duration::from_secs(1)).unwrap(), msg);
+    assert_eq!(s_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(), msg);
 
     let mut ack = Packet {
         pack_type: PacketType::Ack(Ack { fragment_index: 0 }),
@@ -188,7 +188,7 @@ fn round_trip_message() {
 
     ack.routing_header.hop_index = 3;
     // Client receives the ack
-    assert_eq!(c_recv.recv_timeout(Duration::from_secs(1)).unwrap(), ack);
+    assert_eq!(c_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(), ack);
 
     send_packet_to_drone(&env, 11, ack.clone());
 }
@@ -241,7 +241,7 @@ fn return_flood_response_with_one_neighbour() {
     };
 
     assert_eq!(
-        c_recv.recv_timeout(Duration::from_secs(1)).unwrap(),
+        c_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(),
         expected_packet
     );
 
@@ -311,7 +311,7 @@ fn multiple_flood_requests_encounter() {
 
     let mut flood_responses = Vec::new();
 
-    while let Ok(packet) = c_recv.recv_timeout(Duration::from_secs(1)) {
+    while let Ok(packet) = c_recv.recv_timeout(MAX_PACKET_WAIT) {
         flood_responses.push(packet);
     }
 

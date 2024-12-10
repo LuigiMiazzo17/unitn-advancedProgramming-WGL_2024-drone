@@ -1,10 +1,11 @@
 use super::super::drone::*;
+use super::*;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use rand::Rng;
 use std::collections::HashMap;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use wg_2024::packet::Packet;
 
 use wg_2024::controller::{DroneCommand, DroneEvent};
@@ -98,15 +99,14 @@ pub fn terminate_env(hm: Environment) {
             .expect("Failed to send Crash command to drone");
     }
 
-    let timeout = Duration::from_secs(1);
     let start_time = Instant::now();
 
     // check if all drones have finished, panic if not
-    while start_time.elapsed() < timeout {
+    while start_time.elapsed() < DRONE_CRASH_TIMEOUT {
         if hm.iter().all(|(_, (drone_t, _, _))| drone_t.is_finished()) {
             return;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(DRONE_CRASH_POLL_INTERVAL);
     }
 
     panic!("Not all drones have finished in time");
