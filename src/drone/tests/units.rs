@@ -1,7 +1,7 @@
 use super::super::drone::*;
 use super::utils::{
-    generate_random_payload, provision_drones_from_config, send_command_to_drone,
-    send_packet_to_drone, terminate_env,
+    generate_random_config, generate_random_payload, provision_drones_from_config,
+    send_command_to_drone, send_packet_to_drone, terminate_env,
 };
 use super::MAX_PACKET_WAIT;
 
@@ -249,17 +249,17 @@ fn return_flood_response_with_one_neighbour() {
 }
 
 #[test]
-fn multiple_flood_requests_encounter() {
-    let mut config = HashMap::new();
-    config.insert(11, (0.0, vec![12, 13]));
-    config.insert(12, (0.0, vec![11, 14]));
-    config.insert(13, (0.0, vec![11, 14]));
-    config.insert(14, (0.0, vec![12, 13]));
+fn flood_request_on_big_network() {
+    let (seed, config) = generate_random_config();
+    println!("Seed: {}", seed);
+
+    let c_id = 100;
     let (c_send, c_recv) = unbounded();
 
+    let mut expected_config = config.clone();
     let (_, env) = provision_drones_from_config(config);
 
-    send_command_to_drone(&env, 11, DroneCommand::AddSender(1, c_send.clone()));
+    send_command_to_drone(&env, 1, DroneCommand::AddSender(c_id, c_send.clone()));
 
     let session_id = rand::thread_rng().gen::<u64>();
     let flood_id = rand::thread_rng().gen::<u64>();
@@ -267,8 +267,8 @@ fn multiple_flood_requests_encounter() {
     let sending_flood_request = Packet {
         pack_type: PacketType::FloodRequest(FloodRequest {
             flood_id,
-            initiator_id: 1,
-            path_trace: vec![(1, NodeType::Client)],
+            initiator_id: c_id,
+            path_trace: vec![(c_id, NodeType::Client)],
         }),
         routing_header: SourceRoutingHeader {
             hops: Vec::new(),
@@ -278,22 +278,7 @@ fn multiple_flood_requests_encounter() {
     };
 
     // Send the packet to the drone
-    send_packet_to_drone(&env, 11, sending_flood_request.clone());
-
-    let mut expected_network_config = HashMap::new();
-
-    expected_network_config.insert(1, vec![(11, NodeType::Drone)]);
-    expected_network_config.insert(
-        11,
-        vec![
-            (12, NodeType::Drone),
-            (13, NodeType::Drone),
-            (1, NodeType::Client),
-        ],
-    );
-    expected_network_config.insert(12, vec![(11, NodeType::Drone), (14, NodeType::Drone)]);
-    expected_network_config.insert(13, vec![(11, NodeType::Drone), (14, NodeType::Drone)]);
-    expected_network_config.insert(14, vec![(12, NodeType::Drone), (13, NodeType::Drone)]);
+    send_packet_to_drone(&env, 1, sending_flood_request.clone());
 
     fn insert_hop(
         network_config: &mut HashMap<NodeId, Vec<(NodeId, NodeType)>>,
@@ -317,8 +302,6 @@ fn multiple_flood_requests_encounter() {
 
     let mut received_network_config = HashMap::new();
 
-    assert_eq!(flood_responses.len(), 2);
-
     for packet in flood_responses {
         if let PacketType::FloodResponse(flood_response) = packet.pack_type {
             assert_eq!(flood_response.flood_id, flood_id);
@@ -341,11 +324,13 @@ fn multiple_flood_requests_encounter() {
         }
     }
 
-    for (node, hops) in expected_network_config {
-        let expected_hs = HashSet::<NodeId>::from_iter(hops.iter().map(|(id, _)| *id));
+    expected_config.get_mut(&1).unwrap().1.push(c_id);
+
+    for (node_id, (_, hops)) in expected_config {
+        let expected_hs = HashSet::<NodeId>::from_iter(hops.iter().copied());
         let received_hs = HashSet::<NodeId>::from_iter(
             received_network_config
-                .get(&node)
+                .get(&node_id)
                 .unwrap()
                 .iter()
                 .map(|(id, _)| *id),

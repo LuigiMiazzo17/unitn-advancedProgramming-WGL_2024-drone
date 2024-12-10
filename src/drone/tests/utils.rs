@@ -2,15 +2,15 @@ use super::super::drone::*;
 use super::*;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Instant;
-use wg_2024::packet::Packet;
 
 use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
 use wg_2024::network::NodeId;
+use wg_2024::packet::Packet;
 
 type Config = HashMap<NodeId, (f32, Vec<NodeId>)>;
 type Environment = HashMap<NodeId, (thread::JoinHandle<()>, Sender<Packet>, Sender<DroneCommand>)>;
@@ -110,4 +110,44 @@ pub fn terminate_env(hm: Environment) {
     }
 
     panic!("Not all drones have finished in time");
+}
+
+pub fn generate_random_config() -> (u64, Config) {
+    let seed: u64 = rand::thread_rng().gen();
+
+    (seed, generate_random_config_from_seed(seed))
+}
+
+pub fn generate_random_config_from_seed(seed: u64) -> Config {
+    let mut config = HashMap::new();
+
+    let mut r = rand::rngs::StdRng::seed_from_u64(seed);
+
+    let n_drones = r.gen_range(1..=MAX_RANDOM_DRONES);
+    let additional_connections =
+        r.gen_range(1..=AVG_RANDOM_NEIGHBOUR_FOR_DRONE) as u32 * n_drones as u32;
+
+    for i in 0..n_drones {
+        let mut neighbours = Vec::new();
+
+        if i > 0 {
+            neighbours.push(i - 1);
+        }
+        if i < n_drones - 1 {
+            neighbours.push(i + 1);
+        }
+        config.insert(i as NodeId, (0.0, neighbours));
+    }
+
+    for _ in 0..additional_connections {
+        let a = r.gen_range(0..n_drones);
+        let b = r.gen_range(0..n_drones);
+
+        if a != b && !config[&(a as NodeId)].1.contains(&(b as NodeId)) {
+            config.get_mut(&(a as NodeId)).unwrap().1.push(b as NodeId);
+            config.get_mut(&(b as NodeId)).unwrap().1.push(a as NodeId);
+        }
+    }
+
+    config
 }
