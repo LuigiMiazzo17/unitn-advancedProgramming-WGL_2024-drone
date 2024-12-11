@@ -72,6 +72,18 @@ fn drone_removes_sender() {
 }
 
 #[test]
+fn drone_doesnt_panic_if_removing_non_existent_sender() {
+    let mut config = HashMap::new();
+    config.insert(0, (0.0, vec![]));
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, 0, DroneCommand::RemoveSender(1));
+
+    terminate_env(env);
+}
+
+#[test]
 fn drone_updates_pdr() {
     let c_id = 100;
     let s_id = 200;
