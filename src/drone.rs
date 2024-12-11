@@ -150,10 +150,6 @@ impl RustDrone {
             .cloned()
     }
 
-    fn get_source(packet: &Packet) -> Option<NodeId> {
-        packet.routing_header.hops.first().cloned()
-    }
-
     fn deliver_packet(&mut self, channel: &Sender<Packet>, sender_id: NodeId, packet: Packet) {
         if let Err(e) = channel.try_send(packet.clone()) {
             // if error indicates that the receiver has been dropped, we should remove the sender
@@ -251,7 +247,7 @@ impl RustDrone {
     fn return_nack(&mut self, packet: &Packet, nack_type: NackType) {
         info!(
             "Returning NACK to sender '{:?}' from '{}' with reason '{:?}'",
-            Self::get_source(packet),
+            packet.routing_header.hops.first(),
             self.id,
             nack_type
         );
