@@ -154,11 +154,10 @@ impl RustDrone {
         packet.routing_header.hops.first().cloned()
     }
 
-    fn deliver_packet(&mut self, channel: &Sender<Packet>, packet: Packet) {
+    fn deliver_packet(&mut self, channel: &Sender<Packet>, sender_id: NodeId, packet: Packet) {
         if let Err(e) = channel.try_send(packet.clone()) {
             // if error indicates that the receiver has been dropped, we should remove the sender
             if matches!(e, crossbeam::channel::TrySendError::Disconnected(_)) {
-                let sender_id = Self::get_next_hop(&packet).unwrap_or(0);
                 if self.packet_send.remove(&sender_id).is_none() {
                     error!(
                         "Drone '{}' tried to disconnect from '{}', but it was not connected",
@@ -232,7 +231,7 @@ impl RustDrone {
             debug!("Drone '{}' forwarding packet to '{}'", self.id, next_hop);
             packet.routing_header.hop_index += 1;
 
-            self.deliver_packet(&forward_channel, packet)
+            self.deliver_packet(&forward_channel, next_hop, packet)
         } else {
             // drop the packet
             info!("Packet has been dropped from node '{}'", self.id);
@@ -303,8 +302,8 @@ impl RustDrone {
             Some(sender) => sender.clone(),
             None => {
                 error!(
-                    "Next hop is not in the list of connected nodes for drone '{}', even though it was received from it",
-                    self.id
+                    "Drone '{}' tried to return flood response to '{}', but it was not connected to it",
+                    self.id, neighbour
                 );
                 return;
             }
@@ -324,7 +323,7 @@ impl RustDrone {
             self.id,
             neighbour
         );
-        self.deliver_packet(&sender, flood_response);
+        self.deliver_packet(&sender, neighbour, flood_response);
     }
 
     fn handle_flood_request(&mut self, packet: Packet) {
@@ -387,6 +386,7 @@ impl RustDrone {
 
                     self.deliver_packet(
                         sender,
+                        *neighbour,
                         Packet {
                             pack_type: PacketType::FloodRequest(flood_request.clone()),
                             routing_header: SourceRoutingHeader {
