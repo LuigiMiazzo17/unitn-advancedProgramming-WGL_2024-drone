@@ -99,6 +99,9 @@ impl RustDrone {
                         self.id, current_hop
                     );
 
+                    let mut packet = packet;
+                    packet.routing_header.hops[packet.routing_header.hop_index] = self.id;
+
                     self.return_nack(&packet, NackType::UnexpectedRecipient(self.id))
                 }
             }

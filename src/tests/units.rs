@@ -126,6 +126,159 @@ fn drone_updates_pdr() {
 }
 
 #[test]
+fn drone_returns_nack_if_destination_is_drone() {
+    let d_id = 0;
+    let c_id = 100;
+    let mut config = HashMap::new();
+    config.insert(d_id, (0.0, vec![]));
+    let (c_send, c_recv) = unbounded();
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+
+    let session_id = rand::thread_rng().gen::<u64>();
+    let (payload_len, payload) = generate_random_payload();
+
+    let sending_packet = Packet {
+        pack_type: PacketType::MsgFragment(Fragment {
+            fragment_index: 0,
+            total_n_fragments: 1,
+            length: payload_len,
+            data: payload,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, d_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    send_packet_to_drone(&env, d_id, sending_packet.clone());
+
+    let expected_packet = Packet {
+        pack_type: PacketType::Nack(Nack {
+            fragment_index: 0,
+            nack_type: NackType::DestinationIsDrone,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![d_id, c_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    assert_eq!(
+        c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
+        expected_packet
+    );
+
+    terminate_env(env);
+}
+
+#[test]
+fn drone_returns_nack_when_error_in_rouing() {
+    let d_id = 0;
+    let c_id = 100;
+    let mut config = HashMap::new();
+    let (c_send, c_recv) = unbounded();
+    config.insert(d_id, (0.0, vec![]));
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+
+    let session_id = rand::thread_rng().gen::<u64>();
+    let (payload_len, payload) = generate_random_payload();
+
+    let sending_packet = Packet {
+        pack_type: PacketType::MsgFragment(Fragment {
+            fragment_index: 0,
+            total_n_fragments: 1,
+            length: payload_len,
+            data: payload,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, d_id, 1],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    send_packet_to_drone(&env, d_id, sending_packet.clone());
+
+    let expected_packet = Packet {
+        pack_type: PacketType::Nack(Nack {
+            fragment_index: 0,
+            nack_type: NackType::ErrorInRouting(1),
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![d_id, c_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    assert_eq!(
+        c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
+        expected_packet
+    );
+
+    terminate_env(env);
+}
+
+#[test]
+fn drone_returns_nack_if_unexpected_recipient() {
+    let d_id = 0;
+    let c_id = 100;
+    let mut config = HashMap::new();
+    let (c_send, c_recv) = unbounded();
+    config.insert(d_id, (0.0, vec![]));
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+
+    let session_id = rand::thread_rng().gen::<u64>();
+    let (payload_len, payload) = generate_random_payload();
+
+    let sending_packet = Packet {
+        pack_type: PacketType::MsgFragment(Fragment {
+            fragment_index: 0,
+            total_n_fragments: 1,
+            length: payload_len,
+            data: payload,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, 99, 1],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    send_packet_to_drone(&env, d_id, sending_packet.clone());
+
+    let expected_packet = Packet {
+        pack_type: PacketType::Nack(Nack {
+            fragment_index: 0,
+            nack_type: NackType::UnexpectedRecipient(d_id),
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![d_id, c_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    assert_eq!(
+        c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
+        expected_packet
+    );
+
+    terminate_env(env);
+}
+
+#[test]
 fn drone_forwards_fragment() {
     let mut config = HashMap::new();
     config.insert(11, (0.0, vec![]));

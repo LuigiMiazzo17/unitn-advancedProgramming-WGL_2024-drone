@@ -12,8 +12,6 @@ jobs:
 
       - name: Run tests
         uses: frequenz-floss/gh-action-cargo-test@v1.0.0
-        env:
-          RUST_LOG: trace
         with:
           cargo-test-parameters: "--lcov --output-path lcov.json"
 
