@@ -10,7 +10,7 @@ use std::time::Instant;
 use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
 use wg_2024::network::NodeId;
-use wg_2024::packet::Packet;
+use wg_2024::packet::{Packet, PacketType};
 
 type Config = HashMap<NodeId, (f32, Vec<NodeId>)>;
 type Environment = HashMap<NodeId, (thread::JoinHandle<()>, Sender<Packet>, Sender<DroneCommand>)>;
@@ -118,7 +118,7 @@ pub fn generate_random_config() -> (u64, Config) {
     (seed, generate_random_config_from_seed(seed))
 }
 
-pub fn generate_random_config_from_seed(seed: u64) -> Config {
+fn generate_random_config_from_seed(seed: u64) -> Config {
     let mut config = HashMap::new();
 
     let mut r = rand::rngs::StdRng::seed_from_u64(seed);
@@ -150,4 +150,42 @@ pub fn generate_random_config_from_seed(seed: u64) -> Config {
     }
 
     config
+}
+
+pub fn parse_network_from_flood_responses(
+    flood_responses: Vec<Packet>,
+) -> HashMap<NodeId, Vec<NodeId>> {
+    fn insert_hop(network_config: &mut HashMap<NodeId, Vec<NodeId>>, node: NodeId, hop: NodeId) {
+        if let Some(hops) = network_config.get_mut(&node) {
+            if !hops.contains(&hop) {
+                hops.push(hop);
+            }
+        } else {
+            network_config.insert(node, vec![hop]);
+        }
+    }
+
+    let mut received_network_config = HashMap::new();
+
+    for packet in flood_responses {
+        if let PacketType::FloodResponse(flood_response) = packet.pack_type {
+            for (i, (hop, _)) in flood_response.path_trace.clone().into_iter().enumerate() {
+                if i != flood_response.path_trace.len() - 1 {
+                    if let Some(next_hop) = flood_response.path_trace.get(i + 1) {
+                        insert_hop(&mut received_network_config, hop, next_hop.0);
+                    }
+                }
+
+                if i != 0 {
+                    if let Some(prev_hop) = flood_response.path_trace.get(i - 1) {
+                        insert_hop(&mut received_network_config, hop, prev_hop.0);
+                    }
+                }
+            }
+        } else {
+            panic!("Received packet was not a FloodResponse");
+        }
+    }
+
+    received_network_config
 }

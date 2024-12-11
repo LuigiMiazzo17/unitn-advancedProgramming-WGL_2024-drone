@@ -1,20 +1,40 @@
 use super::super::drone::*;
 use super::utils::{
-    generate_random_config, generate_random_payload, provision_drones_from_config,
-    send_command_to_drone, send_packet_to_drone, terminate_env,
+    generate_random_config, generate_random_payload, parse_network_from_flood_responses,
+    provision_drones_from_config, send_command_to_drone, send_packet_to_drone, terminate_env,
 };
-use super::MAX_PACKET_WAIT;
+use super::MAX_PACKET_WAIT_TIMEOUT;
 
 use crossbeam::channel::unbounded;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 
-use wg_2024::controller::DroneCommand;
+use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::{
     Ack, FloodRequest, FloodResponse, Fragment, Nack, NackType, NodeType, Packet, PacketType,
 };
 use wg_2024::tests::*;
+
+#[test]
+fn wrap_generic_fragment_forward() {
+    generic_fragment_forward::<RustDrone>();
+}
+
+#[test]
+fn wrap_generic_fragment_drop() {
+    generic_fragment_drop::<RustDrone>();
+}
+
+#[test]
+fn wrap_generic_chain_fragment_drop() {
+    generic_chain_fragment_drop::<RustDrone>();
+}
+
+#[test]
+fn wrap_generic_chain_fragment_ack() {
+    generic_chain_fragment_ack::<RustDrone>();
+}
 
 #[test]
 fn drone_crashes_upon_cmd() {
@@ -61,7 +81,7 @@ fn drone_forwards_fragment() {
     expected_packet.routing_header.hop_index = 1;
 
     assert_eq!(
-        d2_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(),
+        d2_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
         expected_packet
     );
 
@@ -69,23 +89,181 @@ fn drone_forwards_fragment() {
 }
 
 #[test]
-fn wrap_generic_fragment_forward() {
-    generic_fragment_forward::<RustDrone>();
+fn ack_messages_are_not_affected_by_pdr() {
+    let d_id = 0;
+    let c_id = 100;
+    let s_id = 200;
+    let mut config = HashMap::new();
+    config.insert(d_id, (1.0, vec![]));
+    let (c_send, _) = unbounded();
+    let (s_send, s_recv) = unbounded();
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
+
+    let session_id = rand::thread_rng().gen::<u64>();
+
+    let sending_packet = Packet {
+        pack_type: PacketType::Ack(Ack { fragment_index: 0 }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, d_id, s_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    // Send the packet to the drone
+    send_packet_to_drone(&env, d_id, sending_packet.clone());
+
+    let mut expected_packet = sending_packet;
+    // The packet should have been forwarded to the neighbour
+    expected_packet.routing_header.hop_index = 2;
+
+    assert_eq!(
+        s_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
+        expected_packet
+    );
+
+    terminate_env(env);
 }
 
 #[test]
-fn wrap_generic_fragment_drop() {
-    generic_fragment_drop::<RustDrone>();
+fn nack_messages_are_not_affected_by_pdr() {
+    let d_id = 0;
+    let c_id = 100;
+    let s_id = 200;
+    let mut config = HashMap::new();
+    config.insert(d_id, (1.0, vec![]));
+    let (c_send, _) = unbounded();
+    let (s_send, s_recv) = unbounded();
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
+
+    let session_id = rand::thread_rng().gen::<u64>();
+
+    let sending_packet = Packet {
+        pack_type: PacketType::Nack(Nack {
+            fragment_index: 0,
+            nack_type: NackType::Dropped,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, d_id, s_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    // Send the packet to the drone
+    send_packet_to_drone(&env, d_id, sending_packet.clone());
+
+    let mut expected_packet = sending_packet;
+    // The packet should have been forwarded to the neighbour
+    expected_packet.routing_header.hop_index = 2;
+
+    assert_eq!(
+        s_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
+        expected_packet
+    );
+
+    terminate_env(env);
 }
 
 #[test]
-fn wrap_generic_chain_fragment_drop() {
-    generic_chain_fragment_drop::<RustDrone>();
+fn controll_event_on_packet_sent() {
+    let d_id = 0;
+    let c_id = 100;
+    let s_id = 200;
+    let mut config = HashMap::new();
+    config.insert(d_id, (0.0, vec![]));
+    let (c_send, _) = unbounded();
+    let (s_send, _s_send) = unbounded();
+
+    let (controller_recv, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
+
+    let session_id = rand::thread_rng().gen::<u64>();
+
+    let mut sending_packet = Packet {
+        pack_type: PacketType::Nack(Nack {
+            fragment_index: 0,
+            nack_type: NackType::Dropped,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, d_id, s_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    // Send the packet to the drone
+    send_packet_to_drone(&env, d_id, sending_packet.clone());
+
+    sending_packet.routing_header.hop_index = 2;
+    let expected_packet = DroneEvent::PacketSent(sending_packet);
+
+    assert_eq!(
+        controller_recv
+            .recv_timeout(MAX_PACKET_WAIT_TIMEOUT)
+            .unwrap(),
+        expected_packet
+    );
+
+    terminate_env(env);
 }
 
 #[test]
-fn wrap_generic_chain_fragment_ack() {
-    generic_chain_fragment_ack::<RustDrone>();
+fn controll_event_on_packet_drop() {
+    let d_id = 0;
+    let c_id = 100;
+    let s_id = 200;
+    let mut config = HashMap::new();
+    config.insert(d_id, (1.0, vec![]));
+    let (c_send, _) = unbounded();
+    let (s_send, _s_send) = unbounded();
+
+    let (controller_recv, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
+
+    let session_id = rand::thread_rng().gen::<u64>();
+    let (payload_size, payload) = generate_random_payload();
+
+    let mut sending_packet = Packet {
+        pack_type: PacketType::MsgFragment(Fragment {
+            fragment_index: 0,
+            total_n_fragments: 1,
+            length: payload_size,
+            data: payload,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, d_id, s_id],
+            hop_index: 1,
+        },
+        session_id,
+    };
+
+    // Send the packet to the drone
+    send_packet_to_drone(&env, d_id, sending_packet.clone());
+
+    sending_packet.routing_header.hop_index = 1;
+    let expected_packet = DroneEvent::PacketDropped(sending_packet);
+
+    assert_eq!(
+        controller_recv
+            .recv_timeout(MAX_PACKET_WAIT_TIMEOUT)
+            .unwrap(),
+        expected_packet
+    );
+
+    terminate_env(env);
 }
 
 #[test]
@@ -120,7 +298,7 @@ fn generic_chain_fragment_drop_2() {
     send_packet_to_drone(&env, 11, msg.clone());
 
     assert_eq!(
-        c_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(),
+        c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
         Packet {
             pack_type: PacketType::Nack(Nack {
                 fragment_index: 1,
@@ -172,7 +350,7 @@ fn round_trip_message() {
 
     msg.routing_header.hop_index = 3;
     // Server receives the fragment
-    assert_eq!(s_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(), msg);
+    assert_eq!(s_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(), msg);
 
     let mut ack = Packet {
         pack_type: PacketType::Ack(Ack { fragment_index: 0 }),
@@ -188,7 +366,7 @@ fn round_trip_message() {
 
     ack.routing_header.hop_index = 3;
     // Client receives the ack
-    assert_eq!(c_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(), ack);
+    assert_eq!(c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(), ack);
 
     send_packet_to_drone(&env, 11, ack.clone());
 }
@@ -241,7 +419,7 @@ fn return_flood_response_with_one_neighbour() {
     };
 
     assert_eq!(
-        c_recv.recv_timeout(MAX_PACKET_WAIT).unwrap(),
+        c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
         expected_packet
     );
 
@@ -280,49 +458,13 @@ fn flood_request_on_big_network() {
     // Send the packet to the drone
     send_packet_to_drone(&env, 1, sending_flood_request.clone());
 
-    fn insert_hop(
-        network_config: &mut HashMap<NodeId, Vec<(NodeId, NodeType)>>,
-        node: NodeId,
-        hop: (NodeId, NodeType),
-    ) {
-        if let Some(hops) = network_config.get_mut(&node) {
-            if !hops.contains(&hop) {
-                hops.push(hop);
-            }
-        } else {
-            network_config.insert(node, vec![hop]);
-        }
-    }
-
     let mut flood_responses = Vec::new();
 
-    while let Ok(packet) = c_recv.recv_timeout(MAX_PACKET_WAIT) {
+    while let Ok(packet) = c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT) {
         flood_responses.push(packet);
     }
 
-    let mut received_network_config = HashMap::new();
-
-    for packet in flood_responses {
-        if let PacketType::FloodResponse(flood_response) = packet.pack_type {
-            assert_eq!(flood_response.flood_id, flood_id);
-
-            for (i, (hop, _)) in flood_response.path_trace.clone().into_iter().enumerate() {
-                if i != flood_response.path_trace.len() - 1 {
-                    if let Some(next_hop) = flood_response.path_trace.get(i + 1) {
-                        insert_hop(&mut received_network_config, hop, *next_hop);
-                    }
-                }
-
-                if i != 0 {
-                    if let Some(prev_hop) = flood_response.path_trace.get(i - 1) {
-                        insert_hop(&mut received_network_config, hop, *prev_hop);
-                    }
-                }
-            }
-        } else {
-            panic!("Received packet was not a FloodResponse");
-        }
-    }
+    let received_network_config = parse_network_from_flood_responses(flood_responses);
 
     expected_config.get_mut(&1).unwrap().1.push(c_id);
 
@@ -333,7 +475,7 @@ fn flood_request_on_big_network() {
                 .get(&node_id)
                 .unwrap()
                 .iter()
-                .map(|(id, _)| *id),
+                .copied(),
         );
 
         assert_eq!(expected_hs, received_hs);
