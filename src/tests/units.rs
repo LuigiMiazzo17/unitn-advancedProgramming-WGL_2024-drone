@@ -10,7 +10,6 @@ use rand::Rng;
 use std::collections::{HashMap, HashSet};
 
 use wg_2024::controller::{DroneCommand, DroneEvent};
-use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::{
     Ack, FloodRequest, FloodResponse, Fragment, Nack, NackType, NodeType, Packet, PacketType,
