@@ -10,6 +10,7 @@ use rand::Rng;
 use std::collections::{HashMap, HashSet};
 
 use wg_2024::controller::{DroneCommand, DroneEvent};
+use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::{
     Ack, FloodRequest, FloodResponse, Fragment, Nack, NackType, NodeType, Packet, PacketType,
@@ -42,6 +43,85 @@ fn drone_crashes_upon_cmd() {
     config.insert(11, (0.0, vec![]));
 
     let (_, env) = provision_drones_from_config(config);
+
+    terminate_env(env);
+}
+
+#[test]
+fn drone_adds_sender() {
+    let mut config = HashMap::new();
+    config.insert(11, (0.0, vec![]));
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, 11, DroneCommand::AddSender(12, unbounded().0));
+
+    terminate_env(env);
+}
+
+#[test]
+fn drone_removes_sender() {
+    let mut config = HashMap::new();
+    config.insert(0, (0.0, vec![1]));
+    config.insert(1, (0.0, vec![0]));
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, 0, DroneCommand::RemoveSender(1));
+
+    terminate_env(env);
+}
+
+#[test]
+fn drone_updates_pdr() {
+    let c_id = 100;
+    let s_id = 200;
+    let d_id = 0;
+    let mut config = HashMap::new();
+    config.insert(d_id, (0.0, vec![]));
+    let (c_send, c_recv) = unbounded();
+    let (s_send, _s_recv) = unbounded();
+
+    let (_, env) = provision_drones_from_config(config);
+
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
+    send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
+    send_command_to_drone(&env, d_id, DroneCommand::SetPacketDropRate(1.0));
+
+    let (payload_len, payload) = generate_random_payload();
+
+    let msg = Packet {
+        pack_type: PacketType::MsgFragment(Fragment {
+            fragment_index: 0,
+            total_n_fragments: 1,
+            length: payload_len,
+            data: payload,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![c_id, d_id, s_id],
+            hop_index: 1,
+        },
+        session_id: 1,
+    };
+
+    send_packet_to_drone(&env, d_id, msg);
+
+    let expected_packet = Packet {
+        pack_type: PacketType::Nack(Nack {
+            fragment_index: 0,
+            nack_type: NackType::Dropped,
+        }),
+        routing_header: SourceRoutingHeader {
+            hops: vec![d_id, c_id],
+            hop_index: 1,
+        },
+        session_id: 1,
+    };
+
+    assert_eq!(
+        c_recv.recv_timeout(MAX_PACKET_WAIT_TIMEOUT).unwrap(),
+        expected_packet
+    );
 
     terminate_env(env);
 }
