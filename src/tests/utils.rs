@@ -2,6 +2,7 @@ use super::super::drone::*;
 use super::*;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use log4rs_test_utils::test_logging::init_logging_once_for;
 use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 use std::thread;
@@ -45,6 +46,7 @@ pub fn send_packet_to_drone(hm: &Environment, drone_id: NodeId, packet: Packet) 
 
 pub fn provision_drones_from_config(config: Config) -> (Receiver<DroneEvent>, Environment) {
     let mut hm = HashMap::new();
+    let mut d_loggers_targets = Vec::new();
 
     let (controller_send, controller_recv) = unbounded();
 
@@ -57,7 +59,7 @@ pub fn provision_drones_from_config(config: Config) -> (Receiver<DroneEvent>, En
         let clone_send = controller_send.clone();
 
         let d_t = thread::Builder::new()
-            .name(format!("drone{}", drone_id))
+            .name(format!("drone-{}", drone_id))
             .spawn(move || {
                 let mut drone = RustDrone::new(
                     drone_id,
@@ -71,8 +73,15 @@ pub fn provision_drones_from_config(config: Config) -> (Receiver<DroneEvent>, En
             })
             .expect("Failed to spawn drone thread");
 
+        d_loggers_targets.push(format!("drone-{}", drone_id));
         hm.insert(drone_id, (d_t, d_send, d_command_send));
     }
+    let d_loggers_targets = d_loggers_targets
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<&str>>();
+
+    init_logging_once_for(d_loggers_targets, log::LevelFilter::Trace, None);
 
     // join neighbours
     for (drone_id, (_, _, d_command_send)) in hm.iter() {
