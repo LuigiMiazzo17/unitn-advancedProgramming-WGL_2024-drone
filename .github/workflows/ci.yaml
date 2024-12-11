@@ -15,11 +15,11 @@ jobs:
         env:
           RUST_LOG: trace
         with:
-          cargo-test-parameters: "--codecov --output-path codecov.json"
+          cargo-test-parameters: "--lcov --output-path lcov.json"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: codecov.json
+          files: lcov.json
           fail_ci_if_error: true
