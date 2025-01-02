@@ -12,8 +12,9 @@ wg_2024 = { git = "https://github.com/WGL-2024/WGL_repo_2024.git", features = [
 ] }
 
 [dev-dependencies]
+log4rs_test_utils = "0.2.3"
+rusty_tester = { git = "https://github.com/rusty-drone-2024/rusty-tester" }
 wg_2024 = { git = "https://github.com/WGL-2024/WGL_repo_2024.git", features = [
     "serialize",
     "debug",
 ] }
-log4rs_test_utils = "0.2.3"
