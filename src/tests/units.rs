@@ -41,9 +41,9 @@ fn drone_crashes_upon_cmd() {
     let mut config = HashMap::new();
     config.insert(11, (0.0, vec![]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -51,11 +51,11 @@ fn drone_adds_sender() {
     let mut config = HashMap::new();
     config.insert(11, (0.0, vec![]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 11, DroneCommand::AddSender(12, unbounded().0));
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -64,11 +64,11 @@ fn drone_removes_sender() {
     config.insert(0, (0.0, vec![1]));
     config.insert(1, (0.0, vec![0]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 0, DroneCommand::RemoveSender(1));
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -76,11 +76,11 @@ fn drone_doesnt_panic_if_removing_non_existent_sender() {
     let mut config = HashMap::new();
     config.insert(0, (0.0, vec![]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 0, DroneCommand::RemoveSender(1));
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn drone_updates_pdr() {
     let (c_send, c_recv) = unbounded();
     let (s_send, _s_recv) = unbounded();
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
@@ -134,7 +134,7 @@ fn drone_updates_pdr() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn drone_returns_nack_if_destination_is_drone() {
     config.insert(d_id, (0.0, vec![]));
     let (c_send, c_recv) = unbounded();
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
 
@@ -185,7 +185,7 @@ fn drone_returns_nack_if_destination_is_drone() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn drone_returns_nack_when_error_in_rouing() {
     let (c_send, c_recv) = unbounded();
     config.insert(d_id, (0.0, vec![]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
 
@@ -236,7 +236,7 @@ fn drone_returns_nack_when_error_in_rouing() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn drone_returns_nack_if_unexpected_recipient() {
     let (c_send, c_recv) = unbounded();
     config.insert(d_id, (0.0, vec![]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
 
@@ -287,7 +287,7 @@ fn drone_returns_nack_if_unexpected_recipient() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn drone_forwards_fragment() {
     config.insert(11, (0.0, vec![]));
     let (d2_send, d2_recv) = unbounded();
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 11, DroneCommand::AddSender(12, d2_send.clone()));
 
@@ -329,7 +329,7 @@ fn drone_forwards_fragment() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn ack_messages_are_not_affected_by_pdr() {
     let (c_send, _) = unbounded();
     let (s_send, s_recv) = unbounded();
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
@@ -370,7 +370,7 @@ fn ack_messages_are_not_affected_by_pdr() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -383,7 +383,7 @@ fn nack_messages_are_not_affected_by_pdr() {
     let (c_send, _) = unbounded();
     let (s_send, s_recv) = unbounded();
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
@@ -414,7 +414,7 @@ fn nack_messages_are_not_affected_by_pdr() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -427,7 +427,7 @@ fn controll_event_on_packet_sent() {
     let (c_send, _) = unbounded();
     let (s_send, _s_send) = unbounded();
 
-    let (controller_recv, env) = provision_drones_from_config(config);
+    let (controller_recv, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
@@ -459,7 +459,7 @@ fn controll_event_on_packet_sent() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -472,7 +472,7 @@ fn controll_event_on_packet_drop() {
     let (c_send, _) = unbounded();
     let (s_send, _s_send) = unbounded();
 
-    let (controller_recv, env) = provision_drones_from_config(config);
+    let (controller_recv, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
@@ -507,7 +507,7 @@ fn controll_event_on_packet_drop() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -518,7 +518,7 @@ fn generic_chain_fragment_drop_2() {
     let (c_send, c_recv) = unbounded();
     let (s_send, _s_recv) = unbounded();
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 11, DroneCommand::AddSender(1, c_send.clone()));
     send_command_to_drone(&env, 12, DroneCommand::AddSender(21, s_send.clone()));
@@ -556,7 +556,7 @@ fn generic_chain_fragment_drop_2() {
         }
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -568,7 +568,7 @@ fn round_trip_message() {
     config.insert(11, (0.0, vec![12]));
     config.insert(12, (0.0, vec![11]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 11, DroneCommand::AddSender(1, c_send.clone()));
     send_command_to_drone(&env, 12, DroneCommand::AddSender(21, s_send.clone()));
@@ -623,7 +623,7 @@ fn return_flood_response_with_one_neighbour() {
     config.insert(11, (0.0, vec![12]));
     config.insert(12, (0.0, vec![11]));
 
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 11, DroneCommand::AddSender(1, c_send.clone()));
 
@@ -667,7 +667,7 @@ fn return_flood_response_with_one_neighbour() {
         expected_packet
     );
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 #[test]
@@ -679,7 +679,7 @@ fn flood_request_on_big_network() {
     let (c_send, c_recv) = unbounded();
 
     let mut expected_config = config.clone();
-    let (_, env) = provision_drones_from_config(config);
+    let (_, env) = provision_drones_from_config(&config);
 
     send_command_to_drone(&env, 1, DroneCommand::AddSender(c_id, c_send.clone()));
 
@@ -725,7 +725,7 @@ fn flood_request_on_big_network() {
         assert_eq!(expected_hs, received_hs);
     }
 
-    terminate_env(env);
+    terminate_env(env, config);
 }
 
 /*

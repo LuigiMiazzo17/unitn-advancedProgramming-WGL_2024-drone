@@ -44,7 +44,7 @@ pub fn send_packet_to_drone(hm: &Environment, drone_id: NodeId, packet: Packet) 
         .expect("Failed to send packet to drone");
 }
 
-pub fn provision_drones_from_config(config: Config) -> (Receiver<DroneEvent>, Environment) {
+pub fn provision_drones_from_config(config: &Config) -> (Receiver<DroneEvent>, Environment) {
     let mut hm = HashMap::new();
     let mut d_loggers_targets = Vec::new();
 
@@ -100,13 +100,21 @@ pub fn provision_drones_from_config(config: Config) -> (Receiver<DroneEvent>, En
     (controller_recv, hm)
 }
 
-pub fn terminate_env(hm: Environment) {
-    for (_, (drone_t, _, d_command_send)) in hm.iter() {
+pub fn terminate_env(mut hm: Environment, config: Config) {
+    for (id, (drone_t, _, d_command_send)) in hm.iter() {
         assert!(!drone_t.is_finished());
+        let (_, neighbours) = config.get(id).expect("Failed to get drone config");
+
+        for neighbour in neighbours {
+            let neighbour_command_send = hm.get(neighbour).unwrap().2.clone();
+            let _ = neighbour_command_send.send(DroneCommand::RemoveSender(*id));
+        }
+
         d_command_send
             .send(DroneCommand::Crash)
             .expect("Failed to send Crash command to drone");
     }
+    hm.clear();
 
     let start_time = Instant::now();
 

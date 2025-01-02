@@ -19,11 +19,19 @@ pub struct RustDrone {
     packet_send: HashMap<NodeId, Sender<Packet>>,
     seen_flood_requests: HashSet<u64>,
     log_target: String,
+    state: DroneState,
 }
 
 enum CommandResult {
     Ok,
     Quit,
+}
+
+#[derive(Debug)]
+enum DroneState {
+    Created,
+    Running,
+    Crashing,
 }
 
 impl Drone for RustDrone {
@@ -44,23 +52,34 @@ impl Drone for RustDrone {
             packet_send,
             seen_flood_requests: HashSet::new(),
             log_target: format!("drone-{}", id),
+            state: DroneState::Created,
         }
     }
 
     fn run(&mut self) {
+        trace!(target: &self.log_target, "Drone '{}' has started", self.id);
+        self.state = DroneState::Running;
         loop {
             select_biased! {
                 recv(self.controller_recv) -> command => {
-                    if let Ok(command) = command {
-                        match self.handle_command(command) {
-                            CommandResult::Quit => break,
-                            CommandResult::Ok => {}
+                    if !matches!(self.state, DroneState::Crashing) {
+                        if let Ok(command) = command {
+                            match self.handle_command(command) {
+                                CommandResult::Quit => self.state = DroneState::Crashing,
+                                CommandResult::Ok => {}
+                            }
                         }
                     }
-                }
+                },
                 recv(self.packet_recv) -> packet => {
                     if let Ok(packet) = packet {
                         self.handle_packet(packet);
+                    }
+                    else {
+                        if !matches!(self.state, DroneState::Crashing) {
+                            error!(target: &self.log_target, "Drone '{}' failed to receive packet, crashing", self.id);
+                        }
+                        break; // channel closed, exit the loop
                     }
                 },
             }
@@ -72,11 +91,23 @@ impl Drone for RustDrone {
 impl RustDrone {
     fn handle_packet(&mut self, packet: Packet) {
         trace!(target: &self.log_target,
-            "Drone '{}' on thread '{}' recived packet: {:?}",
+            "Drone '{}' on thread '{}' with state '{:?}' recived packet: {:?}",
             self.id,
             thread::current().name().unwrap_or("unnamed"),
+            self.state,
             packet
         );
+
+        // drone is crashing, ignore all packets
+        if matches!(self.state, DroneState::Crashing) {
+            match packet.pack_type {
+                PacketType::FloodResponse(_) => {}
+                PacketType::Nack(_) => {}
+                PacketType::Ack(_) => {}
+                PacketType::FloodRequest(_) => return,
+                _ => self.return_nack(&packet, NackType::ErrorInRouting(self.id)),
+            };
+        };
 
         match packet.pack_type {
             PacketType::FloodRequest(_) => self.handle_flood_request(packet),
