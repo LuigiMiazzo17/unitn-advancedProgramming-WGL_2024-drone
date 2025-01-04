@@ -1,4 +1,4 @@
-use crossbeam::channel::{select_biased, Receiver, Sender};
+use crossbeam::channel::{select, select_biased, Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
@@ -59,15 +59,14 @@ impl Drone for RustDrone {
     fn run(&mut self) {
         trace!(target: &self.log_target, "Drone '{}' has started", self.id);
         self.state = DroneState::Running;
+
         loop {
             select_biased! {
                 recv(self.controller_recv) -> command => {
-                    if !matches!(self.state, DroneState::Crashing) {
-                        if let Ok(command) = command {
-                            match self.handle_command(command) {
-                                CommandResult::Quit => self.state = DroneState::Crashing,
-                                CommandResult::Ok => {}
-                            }
+                    if let Ok(command) = command {
+                        match self.handle_command(command) {
+                            CommandResult::Quit => break,
+                            CommandResult::Ok => {}
                         }
                     }
                 },
@@ -76,12 +75,27 @@ impl Drone for RustDrone {
                         self.handle_packet(packet);
                     }
                     else {
-                        if !matches!(self.state, DroneState::Crashing) {
-                            error!(target: &self.log_target, "Drone '{}' failed to receive packet, crashing", self.id);
-                        }
+                        error!(target: &self.log_target, "Drone '{}' failed to receive packet, crashing", self.id);
                         break; // channel closed, exit the loop
                     }
                 },
+            }
+        }
+
+        if matches!(self.state, DroneState::Crashing) {
+            trace!(target: &self.log_target, "Drone '{}' is crashing state, waiting for Reciver to be closed", self.id);
+            loop {
+                select! {
+                    recv(self.packet_recv) -> packet => {
+                        if let Ok(packet) = packet {
+                            self.handle_packet(packet);
+                        }
+                        else {
+                            debug!(target: &self.log_target, "Drone '{}' Reciver closed, stopping", self.id);
+                            break;
+                        }
+                    }
+                }
             }
         }
         trace!(target: &self.log_target, "Drone '{}' has succesfully stopped", self.id);
@@ -91,7 +105,7 @@ impl Drone for RustDrone {
 impl RustDrone {
     fn handle_packet(&mut self, packet: Packet) {
         trace!(target: &self.log_target,
-            "Drone '{}' on thread '{}' with state '{:?}' recived packet: {:?}",
+            "Drone '{}' on thread '{}' with state '{:?}' recived packet: {:?}",
             self.id,
             thread::current().name().unwrap_or("unnamed"),
             self.state,
@@ -165,6 +179,7 @@ impl RustDrone {
             }
             DroneCommand::Crash => {
                 info!(target: &self.log_target, "Drone '{}' recived crash", self.id);
+                self.state = DroneState::Crashing;
                 CommandResult::Quit
             }
         }
