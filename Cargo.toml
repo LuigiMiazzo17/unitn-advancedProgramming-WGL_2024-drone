@@ -1,12 +1,12 @@
 [package]
 name = "wg_2024-rust"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2021"
 
 [dependencies]
 crossbeam = "0.8.4"
 log = "0.4.22"
-rand = "0.8.5"
+rand = "0.9.0"
 wg_2024 = { git = "https://github.com/WGL-2024/WGL_repo_2024.git", features = [
     "serialize",
 ] }

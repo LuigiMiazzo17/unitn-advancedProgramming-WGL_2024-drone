@@ -6,7 +6,6 @@ use super::utils::{
 use super::MAX_PACKET_WAIT_TIMEOUT;
 
 use crossbeam::channel::unbounded;
-use rand::Rng;
 use std::collections::{HashMap, HashSet};
 
 use wg_2024::controller::{DroneCommand, DroneEvent};
@@ -149,7 +148,7 @@ fn drone_returns_nack_if_destination_is_drone() {
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
     let (payload_len, payload) = generate_random_payload();
 
     let sending_packet = Packet {
@@ -200,7 +199,7 @@ fn drone_returns_nack_when_error_in_rouing() {
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
     let (payload_len, payload) = generate_random_payload();
 
     let sending_packet = Packet {
@@ -251,7 +250,7 @@ fn drone_returns_nack_if_unexpected_recipient() {
 
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
     let (payload_len, payload) = generate_random_payload();
 
     let sending_packet = Packet {
@@ -301,7 +300,7 @@ fn drone_forwards_fragment() {
     send_command_to_drone(&env, 11, DroneCommand::AddSender(12, d2_send.clone()));
 
     let (payload_len, payload) = generate_random_payload();
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
 
     let sending_packet = Packet {
         pack_type: PacketType::MsgFragment(Fragment {
@@ -347,7 +346,7 @@ fn ack_messages_are_not_affected_by_pdr() {
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
 
     let sending_packet = Packet {
         pack_type: PacketType::Ack(Ack { fragment_index: 0 }),
@@ -388,7 +387,7 @@ fn nack_messages_are_not_affected_by_pdr() {
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
 
     let sending_packet = Packet {
         pack_type: PacketType::Nack(Nack {
@@ -432,7 +431,7 @@ fn controll_event_on_packet_sent() {
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
 
     let mut sending_packet = Packet {
         pack_type: PacketType::Nack(Nack {
@@ -477,7 +476,7 @@ fn controll_event_on_packet_drop() {
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(c_id, c_send.clone()));
     send_command_to_drone(&env, d_id, DroneCommand::AddSender(s_id, s_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
     let (payload_size, payload) = generate_random_payload();
 
     let mut sending_packet = Packet {
@@ -586,7 +585,7 @@ fn round_trip_message() {
             hops: vec![1, 11, 12, 21],
             hop_index: 1,
         },
-        session_id: rand::thread_rng().gen::<u64>(),
+        session_id: rand::random::<u64>(),
     };
 
     // "Client" sends packet to the drone
@@ -627,8 +626,8 @@ fn return_flood_response_with_one_neighbour() {
 
     send_command_to_drone(&env, 11, DroneCommand::AddSender(1, c_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
-    let flood_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
+    let flood_id = rand::random::<u64>();
 
     let sending_flood_request = Packet {
         pack_type: PacketType::FloodRequest(FloodRequest {
@@ -683,8 +682,8 @@ fn flood_request_on_big_network() {
 
     send_command_to_drone(&env, 1, DroneCommand::AddSender(c_id, c_send.clone()));
 
-    let session_id = rand::thread_rng().gen::<u64>();
-    let flood_id = rand::thread_rng().gen::<u64>();
+    let session_id = rand::random::<u64>();
+    let flood_id = rand::random::<u64>();
 
     let sending_flood_request = Packet {
         pack_type: PacketType::FloodRequest(FloodRequest {
@@ -767,6 +766,16 @@ fn drone_packet_3_hop_crash() {
 #[test]
 fn easiest_flood() {
     test_easiest_flood::<Tested>(FLOOD_TIMEOUT);
+}
+
+#[test]
+fn sequential_flood() {
+    test_sequential_id_flood::<Tested>(FLOOD_TIMEOUT);
+}
+
+#[test]
+fn packet_send_flood() {
+    test_packet_send_flood::<Tested>(FLOOD_TIMEOUT);
 }
 
 #[test]

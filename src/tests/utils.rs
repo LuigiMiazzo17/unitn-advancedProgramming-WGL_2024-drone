@@ -17,9 +17,9 @@ type Config = HashMap<NodeId, (f32, Vec<NodeId>)>;
 type Environment = HashMap<NodeId, (thread::JoinHandle<()>, Sender<Packet>, Sender<DroneCommand>)>;
 
 pub fn generate_random_payload() -> (u8, [u8; 128]) {
-    let payload_len = rand::thread_rng().gen_range(1..128) as u8;
+    let payload_len = rand::rng().random_range(1..=128);
     let mut payload: [u8; 128] = [0; 128];
-    let payload_vec = vec![rand::thread_rng().gen::<u8>(); payload_len as usize];
+    let payload_vec = vec![rand::random::<u8>(); payload_len as usize];
 
     for (i, byte) in payload_vec.iter().enumerate() {
         payload[i] = *byte;
@@ -130,7 +130,7 @@ pub fn terminate_env(mut hm: Environment, config: Config) {
 }
 
 pub fn generate_random_config() -> (u64, Config) {
-    let seed: u64 = rand::thread_rng().gen();
+    let seed: u64 = rand::random();
 
     (seed, generate_random_config_from_seed(seed))
 }
@@ -140,9 +140,9 @@ fn generate_random_config_from_seed(seed: u64) -> Config {
 
     let mut r = rand::rngs::StdRng::seed_from_u64(seed);
 
-    let n_drones = r.gen_range(1..=MAX_RANDOM_DRONES);
+    let n_drones = r.random_range(1..=MAX_RANDOM_DRONES);
     let additional_connections =
-        r.gen_range(1..=AVG_RANDOM_NEIGHBOUR_FOR_DRONE) as u32 * n_drones as u32;
+        r.random_range(1..=AVG_RANDOM_NEIGHBOUR_FOR_DRONE) as u32 * n_drones as u32;
 
     for i in 0..n_drones {
         let mut neighbours = Vec::new();
@@ -157,8 +157,8 @@ fn generate_random_config_from_seed(seed: u64) -> Config {
     }
 
     for _ in 0..additional_connections {
-        let a = r.gen_range(0..n_drones);
-        let b = r.gen_range(0..n_drones);
+        let a = r.random_range(0..n_drones);
+        let b = r.random_range(0..n_drones);
 
         if a != b && !config[&(a as NodeId)].1.contains(&(b as NodeId)) {
             config.get_mut(&(a as NodeId)).unwrap().1.push(b as NodeId);

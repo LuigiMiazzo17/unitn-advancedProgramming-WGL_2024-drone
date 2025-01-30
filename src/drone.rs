@@ -17,7 +17,7 @@ pub struct RustDrone {
     packet_recv: Receiver<Packet>,
     pdr: f32,
     packet_send: HashMap<NodeId, Sender<Packet>>,
-    seen_flood_requests: HashSet<u64>,
+    seen_flood_requests: HashSet<(NodeId, u64)>,
     log_target: String,
     state: DroneState,
 }
@@ -272,7 +272,7 @@ impl RustDrone {
 
         // we are connected to the next hop, now we might want to drop the packet only if it's a fragment
         if !matches!(packet.pack_type, PacketType::MsgFragment(_))
-            || rand::thread_rng().gen_range(0.0..1.0) >= self.pdr
+            || rand::rng().random_range(0.0..1.0) >= self.pdr
         {
             // luck is on our side, we can forward the packet
             debug!(target: &self.log_target, "Drone '{}' forwarding packet to '{}'", self.id, next_hop);
@@ -379,10 +379,22 @@ impl RustDrone {
             _ => unreachable!(),
         };
 
+        let initializator_id = match flood_request.path_trace.first() {
+            Some(a) => a.0,
+            None => {
+                error!(target: &self.log_target,
+                    "Path trace in flood request {} is empty",
+                    flood_request.flood_id
+                );
+                return;
+            }
+        };
+
         trace!(target: &self.log_target,
-            "Drone '{}' handling flood request with id '{}'",
+            "Drone '{}' handling flood request with id '{}' from node '{}'",
             self.id,
-            flood_request.flood_id
+            flood_request.flood_id,
+            initializator_id
         );
 
         let sender_id = match flood_request.path_trace.last() {
@@ -398,7 +410,10 @@ impl RustDrone {
 
         flood_request.path_trace.push((self.id, NodeType::Drone));
 
-        if self.seen_flood_requests.contains(&flood_request.flood_id) {
+        if self
+            .seen_flood_requests
+            .contains(&(initializator_id, flood_request.flood_id))
+        {
             // we have already seen this flood request
             debug!(target: &self.log_target,
                 "Drone '{}' has already seen flood request with id '{}'",
@@ -408,10 +423,11 @@ impl RustDrone {
         } else {
             // never seen this flood request
             debug!(target: &self.log_target,
-                "Drone '{}' handling flood request with id '{}' for the first time",
-                self.id, flood_request.flood_id
+                "Drone '{}' handling flood request with id '{}' from node '{}' for the first time",
+                self.id, flood_request.flood_id, initializator_id
             );
-            self.seen_flood_requests.insert(flood_request.flood_id);
+            self.seen_flood_requests
+                .insert((initializator_id, flood_request.flood_id));
 
             if self.packet_send.len() > 1 {
                 // we have more than one neighbour, we need to forward the flood request to all but one
