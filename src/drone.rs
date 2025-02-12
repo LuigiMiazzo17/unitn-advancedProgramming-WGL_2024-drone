@@ -303,33 +303,60 @@ impl RustDrone {
             nack_type
         );
 
-        // reverse the hops list to get new path
-        let hops = packet
-            .routing_header
-            .hops
-            .split_at(packet.routing_header.hop_index + 1)
-            .0
-            .iter()
-            .rev()
-            .cloned()
-            .collect();
+        match &packet.pack_type {
+            PacketType::Ack(_) | PacketType::Nack(_) | PacketType::FloodResponse(_) => {
+                warn!(target: &self.log_target,
+                    "Drone '{}' returning NACK to sender for Ack, Nack or FloodResponse",
+                    self.id
+                );
+                // send shortcut to controller if the packet is Ack, Nack or FloodResponse
+                if self
+                    .controller_send
+                    .send(DroneEvent::ControllerShortcut(packet.clone()))
+                    .is_err()
+                {
+                    error!(target: &self.log_target,
+                        "Drone '{}' failed to send ControllerShortcut event to controller",
+                        self.id
+                    );
+                }
+            }
+            _ => {
+                debug!(target: &self.log_target,
+                    "Drone '{}' returning NACK to sender for MsgFragment",
+                    self.id
+                );
+                // send NACK to the sender
+                // reverse the hops list to get new path
+                let hops = packet
+                    .routing_header
+                    .hops
+                    .split_at(packet.routing_header.hop_index + 1)
+                    .0
+                    .iter()
+                    .rev()
+                    .cloned()
+                    .collect();
 
-        // build the NACK packet
-        let nack = Packet {
-            pack_type: PacketType::Nack(Nack {
-                fragment_index: if let PacketType::MsgFragment(fragment) = &packet.pack_type {
-                    fragment.fragment_index
-                } else {
-                    0
-                },
-                nack_type,
-            }),
-            routing_header: SourceRoutingHeader { hops, hop_index: 0 },
-            session_id: packet.session_id,
+                // build the NACK packet
+                let nack = Packet {
+                    pack_type: PacketType::Nack(Nack {
+                        fragment_index: if let PacketType::MsgFragment(fragment) = &packet.pack_type
+                        {
+                            fragment.fragment_index
+                        } else {
+                            0
+                        },
+                        nack_type,
+                    }),
+                    routing_header: SourceRoutingHeader { hops, hop_index: 0 },
+                    session_id: packet.session_id,
+                };
+
+                // now route the NACK packet
+                self.route_packet(nack);
+            }
         };
-
-        // now route the NACK packet
-        self.route_packet(nack);
     }
 
     fn return_flood_response(
